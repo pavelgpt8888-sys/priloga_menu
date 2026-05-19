@@ -150,7 +150,7 @@ function TodayView(props: { meals: MealPlan[]; dishMap: Map<string, DishComponen
   return <div className="grid gap-5 xl:grid-cols-[1fr_360px]">
     <div className="space-y-5">
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{quick.map((label) => <Button key={label} variant="soft" className="justify-start" onClick={() => props.onQuick(label)}>{label}</Button>)}</div>
-      {props.meals.map((meal) => <MealCard key={meal.id} meal={meal} dishMap={props.dishMap} {...props} />)}
+      {props.meals.map((meal) => <MealCard key={meal.id} meal={meal} {...props} />)}
     </div>
     <div className="space-y-5">
       <InfoCard title="Срочно использовать" items={["яйца до 24 мая", "огурцы сегодня-завтра", "пюре превратить в зразы"]} tone="tip" />
