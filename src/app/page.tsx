@@ -95,27 +95,29 @@ export default function HomePage() {
   }
 
   return (
-    <main className="min-h-screen bg-background pb-24 text-foreground lg:pb-0">
+    <main className="app-bg min-h-screen bg-background pb-24 text-foreground lg:pb-0">
       <div className="mx-auto flex max-w-[1500px] gap-5 p-3 sm:p-5">
-        <aside className="sticky top-5 hidden h-[calc(100vh-40px)] w-64 shrink-0 rounded-[1.7rem] border border-border bg-[#FFFDF8] p-4 shadow-[0_18px_50px_rgba(79,124,93,0.12)] lg:block">
-          <div className="mb-6 flex items-center gap-3 rounded-2xl bg-[#EAF4EC] p-3">
-            <div className="grid size-11 place-items-center rounded-xl bg-primary text-white"><ChefHat size={24} /></div>
+        <aside className="sticky top-5 hidden h-[calc(100vh-40px)] w-64 shrink-0 overflow-hidden rounded-[1.7rem] border border-[#DCCDB8] bg-[#FFFDF6]/95 p-4 shadow-[0_24px_70px_rgba(63,93,66,0.16)] lg:block">
+          <div className="mb-6 flex items-center gap-3 rounded-2xl bg-gradient-to-br from-[#fff1c9] to-[#edf7ed] p-3 ring-1 ring-[#e4d2a6]">
+            <div className="grid size-11 place-items-center rounded-xl bg-[#e4b35a] text-[#24312b] shadow-inner"><ChefHat size={24} /></div>
             <div><p className="font-bold leading-tight">Домашний диспетчер еды</p><p className="text-sm text-muted-foreground">семейный помощник</p></div>
           </div>
           <nav className="grid gap-1">
-            {sections.map(([name, Icon]) => <button key={name} onClick={() => setActive(name)} className={`flex min-h-11 items-center gap-3 rounded-xl px-3 text-left text-sm font-semibold transition ${active === name ? "bg-primary text-white" : "text-[#40504A] hover:bg-[#FFF3D6]"}`}><Icon size={18} />{name}</button>)}
+            {sections.map(([name, Icon]) => <button key={name} onClick={() => setActive(name)} className={`flex min-h-11 items-center gap-3 rounded-xl px-3 text-left text-sm font-semibold transition ${active === name ? "bg-[#3f7d52] text-white shadow-[0_10px_22px_rgba(63,125,82,0.24)]" : "text-[#4c5c55] hover:bg-[#fff1c9]"}`}><Icon size={18} />{name}{name === "Покупки" && state.shopping.length > 0 ? <span className="ml-auto rounded-full bg-[#e4b35a] px-2 py-0.5 text-xs text-[#24312b]">{state.shopping.length}</span> : null}</button>)}
           </nav>
         </aside>
 
         <section className="min-w-0 flex-1 space-y-5">
-          <header className="rounded-[1.8rem] border border-border bg-[#FFFDF8] p-4 shadow-[0_14px_40px_rgba(79,124,93,0.08)] sm:p-6">
+          <header className="relative overflow-hidden rounded-[1.8rem] border border-[#DCCDB8] bg-[#FFFDF6]/95 p-4 shadow-[0_18px_55px_rgba(63,93,66,0.13)] sm:p-6">
+            <div className="pointer-events-none absolute right-0 top-0 h-full w-72 bg-[radial-gradient(circle_at_70%_30%,rgba(228,179,90,0.28),transparent_34%),linear-gradient(135deg,transparent,#edf7ed)]" />
             <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
               <div>
                 <p className="text-sm font-semibold text-[#4F7C5D]">Сегодня дома · {new Date().toLocaleDateString("ru-RU", { weekday: "long", day: "numeric", month: "long" })}</p>
                 <h1 className="mt-1 text-3xl font-black tracking-normal sm:text-4xl">Что готовим, что осталось и что купить</h1>
               </div>
               <div className="flex flex-wrap gap-2">
-                {state.family.map((member) => <span key={member.id} className="rounded-full border border-border bg-white px-3 py-2 text-sm font-semibold text-[#40504A]">{member.name}, {member.age}</span>)}
+                {state.family.map((member) => <span key={member.id} className="rounded-full border border-[#dccdb8] bg-[#fffdf6] px-3 py-2 text-sm font-semibold text-[#40504A] shadow-sm">{member.name}, {member.age}</span>)}
+                <Button variant="soft" onClick={() => setActive("Покупки")}><ShoppingBasket size={17} />Открыть покупки · {state.shopping.length}</Button>
               </div>
             </div>
             <form onSubmit={handleCommand} className="mt-5 flex flex-col gap-2 sm:flex-row">
@@ -124,9 +126,9 @@ export default function HomePage() {
             </form>
           </header>
 
-          {toast && <div className="flex flex-col gap-3 rounded-2xl border border-[#C9DEC9] bg-[#EAF4EC] p-4 text-sm font-semibold text-[#2F5F3D] sm:flex-row sm:items-center sm:justify-between"><span>{toast}</span>{undo && <Button variant="outline" size="sm" onClick={() => { setState(undo); setUndo(null); setToast("Отменено. Вернули предыдущее состояние."); }}><RotateCcw size={16} />Отменить</Button>}</div>}
+          {toast && <div className="flex flex-col gap-3 rounded-2xl border border-[#b9d6b8] bg-[#edf7ed] p-4 text-sm font-semibold text-[#285f3b] shadow-[0_12px_30px_rgba(63,125,82,0.10)] sm:flex-row sm:items-center sm:justify-between"><span>{toast}</span>{undo && <Button variant="outline" size="sm" onClick={() => { setState(undo); setUndo(null); setToast("Отменено. Вернули предыдущее состояние."); }}><RotateCcw size={16} />Отменить</Button>}</div>}
 
-          {active === "Сегодня" && <TodayView meals={todayMeals} dishMap={dishMap} onReplace={(meal, slot) => commit(replaceComponent(state, meal.id, slot), `Заменили ${slotLabels[slot]}.`)} onRemove={(meal, slot) => commit(removeComponent(state, meal.id, slot), `Убрали ${slotLabels[slot]}.`)} onMove={moveMeal} onRepeat={repeatMeal} onShop={addMealToShopping} onBan={(dish) => commit(banDish(state, dish.id), `${dish.name}: пока не предлагаем.`)} onCook={startCooking} onQuick={handleQuick} />}
+          {active === "Сегодня" && <TodayView meals={todayMeals} shopping={state.shopping} dishMap={dishMap} onOpenShopping={() => setActive("Покупки")} onReplace={(meal, slot) => commit(replaceComponent(state, meal.id, slot), `Заменили ${slotLabels[slot]}.`)} onRemove={(meal, slot) => commit(removeComponent(state, meal.id, slot), `Убрали ${slotLabels[slot]}.`)} onMove={moveMeal} onRepeat={repeatMeal} onShop={addMealToShopping} onBan={(dish) => commit(banDish(state, dish.id), `${dish.name}: пока не предлагаем.`)} onCook={startCooking} onQuick={handleQuick} />}
           {active === "Меню" && <MenuView meals={state.meals} dishMap={dishMap} regenerate={regenerate} onReplace={(meal, slot) => commit(replaceComponent(state, meal.id, slot), `Заменили ${slotLabels[slot]} в календаре.`)} />}
           {active === "Блюда" && <DishesView dishes={state.dishes} onBan={(dish) => commit(banDish(state, dish.id), `${dish.name}: скрыто из предложений.`)} />}
           {active === "Семья" && <FamilyView state={state} />}
@@ -146,7 +148,7 @@ export default function HomePage() {
   );
 }
 
-function TodayView(props: { meals: MealPlan[]; dishMap: Map<string, DishComponent>; onReplace: (meal: MealPlan, slot: MealComponent["slot"]) => void; onRemove: (meal: MealPlan, slot: MealComponent["slot"]) => void; onMove: (meal: MealPlan) => void; onRepeat: (meal: MealPlan) => void; onShop: (meal: MealPlan) => void; onBan: (dish: DishComponent) => void; onCook: (meal: MealPlan) => void; onQuick: (label: string) => void; }) {
+function TodayView(props: { meals: MealPlan[]; shopping: ShoppingItem[]; dishMap: Map<string, DishComponent>; onOpenShopping: () => void; onReplace: (meal: MealPlan, slot: MealComponent["slot"]) => void; onRemove: (meal: MealPlan, slot: MealComponent["slot"]) => void; onMove: (meal: MealPlan) => void; onRepeat: (meal: MealPlan) => void; onShop: (meal: MealPlan) => void; onBan: (dish: DishComponent) => void; onCook: (meal: MealPlan) => void; onQuick: (label: string) => void; }) {
   return <div className="grid gap-5 xl:grid-cols-[1fr_360px]">
     <div className="space-y-5">
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{quick.map((label) => <Button key={label} variant="soft" className="justify-start" onClick={() => props.onQuick(label)}>{label}</Button>)}</div>
@@ -154,7 +156,7 @@ function TodayView(props: { meals: MealPlan[]; dishMap: Map<string, DishComponen
     </div>
     <div className="space-y-5">
       <InfoCard title="Срочно использовать" items={["яйца до 24 мая", "огурцы сегодня-завтра", "пюре превратить в зразы"]} tone="tip" />
-      <InfoCard title="Покупки по меню" items={["список считается из меню", "вычитает запасы, остатки и морозилку", "одинаковые продукты объединяются"]} />
+      <ShoppingPreview items={props.shopping} onOpen={props.onOpenShopping} />
       <InfoCard title="AI-фото холодильника" items={["Распознать продукты по фото", "MVP: место в интерфейсе готово", "позже: фото → подтверждение → запасы"]} tone="success" />
     </div>
   </div>;
@@ -170,7 +172,7 @@ function MealCard({ meal, dishMap, onReplace, onRemove, onMove, onRepeat, onShop
       {meal.components.map((component) => {
         const dish = dishMap.get(component.dishId);
         if (!dish) return null;
-        return <div key={`${meal.id}-${component.slot}`} className="rounded-2xl border border-border bg-white p-4">
+        return <div key={`${meal.id}-${component.slot}`} className="rounded-2xl border border-[#e2d6c4] bg-[#fffdf6] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.75)]">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div><p className="text-xs font-bold uppercase tracking-wide text-[#5F6B66]">{slotLabels[component.slot]}</p><p className="text-lg font-black">{dish.name}</p><p className="text-sm text-muted-foreground">{dish.effort === "easy" ? "быстро" : dish.effort === "weekend" ? "лучше на выходные" : "обычно"} · {dish.cost === "low" ? "недорого" : "средняя цена"}</p></div>
             <div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" onClick={() => onReplace(meal, component.slot)}>Заменить</Button><Button variant="ghost" size="sm" onClick={() => onRemove(meal, component.slot)}>Убрать</Button><Button variant="ghost" size="sm" onClick={() => onBan(dish)}>Не предлагать пока</Button></div>
@@ -213,4 +215,26 @@ function ShoppingView({ state, setState, commit, manualProduct, setManualProduct
 
 function SettingsView({ state, reset }: { state: AppState; reset: () => void }) { return <div className="grid gap-4 xl:grid-cols-2"><Card><CardHeader><CardTitle>Настройки MVP</CardTitle></CardHeader><CardContent className="space-y-3"><p className="text-muted-foreground">Данные хранятся локально в браузере. Supabase-поля и модели подготовлены для следующего этапа.</p><Button variant="outline" onClick={reset}>Сбросить демо-данные</Button><details className="rounded-xl border border-border bg-white p-4"><summary className="cursor-pointer font-bold">Настроить подробнее</summary><p className="mt-3 text-sm text-muted-foreground">Позже здесь будут профили питания, лимиты бюджета, синхронизация и AI-фото холодильника.</p></details></CardContent></Card><Card><CardHeader><CardTitle>Импорт рецепта по ссылке</CardTitle></CardHeader><CardContent className="space-y-3"><Input placeholder="Ссылка на рецепт" defaultValue={state.recipes[0]?.url} /><Input placeholder="Название черновика" defaultValue={state.recipes[0]?.title} /><Textarea placeholder="Ингредиенты вручную. Позже сюда подключится schema.org Recipe parser." /><Textarea placeholder="Шаги приготовления" /><Button variant="soft">Сохранить черновик</Button></CardContent></Card></div>; }
 
-function InfoCard({ title, items, tone = "default" }: { title: string; items: string[]; tone?: "default" | "tip" | "success" }) { return <Card className={tone === "tip" ? "bg-[#FFF3D6]" : tone === "success" ? "bg-[#EAF4EC]" : ""}><CardHeader><CardTitle>{title}</CardTitle></CardHeader><CardContent><ul className="space-y-2 text-sm text-[#40504A]">{items.map((item) => <li key={item} className="flex gap-2"><ListChecks className="mt-0.5 size-4 shrink-0 text-primary" />{item}</li>)}</ul></CardContent></Card>; }
+function ShoppingPreview({ items, onOpen }: { items: ShoppingItem[]; onOpen: () => void }) {
+  const visible = items.filter((item) => !item.checked && !item.alreadyAtHome).slice(0, 6);
+  return <Card className="border-[#e2bf6b] bg-gradient-to-br from-[#fff1c9] to-[#fff9e9]">
+    <CardHeader className="flex flex-row items-center justify-between gap-3">
+      <div>
+        <CardTitle>Общий список покупок</CardTitle>
+        <p className="text-sm text-[#5F6B66]">Что взять в магазине по меню</p>
+      </div>
+      <Button variant="outline" size="sm" onClick={onOpen}>Открыть</Button>
+    </CardHeader>
+    <CardContent>
+      {visible.length ? <ul className="space-y-2 text-sm text-[#40504A]">
+        {visible.map((item) => <li key={item.id} className="flex items-center justify-between gap-3 rounded-xl bg-[#fffdf6]/85 px-3 py-2">
+          <span className="font-semibold">{item.product}</span>
+          <span className="text-[#5F6B66]">{item.amount} {item.unit}</span>
+        </li>)}
+      </ul> : <p className="rounded-xl bg-[#fffdf6]/85 p-3 text-sm text-[#5F6B66]">Пока все есть дома или список пуст.</p>}
+      {items.length > visible.length ? <p className="mt-3 text-sm font-semibold text-[#4F7C5D]">Еще позиций: {items.length - visible.length}</p> : null}
+    </CardContent>
+  </Card>;
+}
+
+function InfoCard({ title, items, tone = "default" }: { title: string; items: string[]; tone?: "default" | "tip" | "success" }) { return <Card className={tone === "tip" ? "border-[#e2bf6b] bg-gradient-to-br from-[#fff1c9] to-[#fff9e9]" : tone === "success" ? "border-[#b9d6b8] bg-gradient-to-br from-[#edf7ed] to-[#f8fff5]" : ""}><CardHeader><CardTitle>{title}</CardTitle></CardHeader><CardContent><ul className="space-y-2 text-sm text-[#40504A]">{items.map((item) => <li key={item} className="flex gap-2"><ListChecks className="mt-0.5 size-4 shrink-0 text-primary" />{item}</li>)}</ul></CardContent></Card>; }
