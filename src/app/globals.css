@@ -1,0 +1,49 @@
+@import "tailwindcss";
+
+@theme inline {
+  --font-sans: "Geist", "Geist Fallback", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono", "Geist Mono Fallback", ui-monospace, monospace;
+  --color-background: #faf7ef;
+  --color-foreground: #263238;
+  --color-card: #fffdf8;
+  --color-card-foreground: #263238;
+  --color-muted: #f5efe2;
+  --color-muted-foreground: #5f6b66;
+  --color-primary: #4f7c5d;
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #d9a441;
+  --color-secondary-foreground: #263238;
+  --color-destructive: #c56a4a;
+  --color-destructive-foreground: #ffffff;
+  --color-border: #e8e1d3;
+  --color-input: #e8e1d3;
+  --color-ring: #5f8d6a;
+  --radius-lg: 1.25rem;
+  --radius-md: 0.9rem;
+  --radius-sm: 0.6rem;
+}
+
+:root { color-scheme: light; }
+
+* { box-sizing: border-box; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: #faf7ef;
+  color: #263238;
+  font-family: var(--font-sans);
+}
+
+button, input, textarea, select { font: inherit; }
+
+button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible {
+  outline: 3px solid #5f8d6a;
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.001ms !important; scroll-behavior: auto !important; transition-duration: 0.001ms !important; }
+}
