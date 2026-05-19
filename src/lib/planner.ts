@@ -36,6 +36,32 @@ function role(dishes: DishComponent[], dishRole: DishRole, banned: string[], fil
   });
 }
 
+function textHas(dish: DishComponent, words: string[]) {
+  const text = `${dish.name} ${dish.ingredients.map((item) => item.name).join(" ")}`.toLowerCase();
+  return words.some((word) => text.includes(word.toLowerCase()));
+}
+
+function breakfastAddonPool(base: DishComponent, addons: DishComponent[]) {
+  if (textHas(base, ["каша", "овсян", "греч", "рисов", "пшен"])) {
+    return addons.filter((dish) => textHas(dish, ["яблок", "банан", "орех", "мед", "огур", "помид"]));
+  }
+  if (textHas(base, ["блины", "сырники", "творог", "запеканка", "вареники"])) {
+    return addons.filter((dish) => textHas(dish, ["варенье", "мед", "ягод", "банан", "яблок"]));
+  }
+  if (textHas(base, ["омлет", "яичница", "тосты", "бутерброды"])) {
+    return addons.filter((dish) => textHas(dish, ["огур", "помид", "сыр", "яблок"]));
+  }
+  return addons.filter((dish) => !dish.sweetPastry);
+}
+
+function breakfastDrinkPool(base: DishComponent, addons: DishComponent[]) {
+  const drinks = addons.filter((dish) => textHas(dish, ["чай", "какао"]));
+  if (textHas(base, ["каша", "греч", "рисов", "пшен"])) {
+    return drinks.filter((dish) => textHas(dish, ["чай"]));
+  }
+  return drinks.length ? drinks : addons;
+}
+
 export function generateWeek(state: AppState, mode: "balanced" | "simple" | "cheap" | "leftovers" | "freezer" = "balanced"): MealPlan[] {
   const used = new Set<string>();
   const dates = nextSevenDays();
@@ -58,12 +84,14 @@ export function generateWeek(state: AppState, mode: "balanced" | "simple" | "che
     const soupPool = role(state.dishes, "soup", state.bannedDishIds);
 
     const base = pick(breakfastBasePool, index + 1, used);
-    const addon = pick(addonPool.filter((dish) => !dish.sweetPastry || base.role === "breakfast_base"), index + 4, used, addonPool);
+    const addonChoices = breakfastAddonPool(base, addonPool);
+    const addon = pick(addonChoices.length ? addonChoices : addonPool.filter((dish) => !dish.sweetPastry), index + 4, used, addonPool);
+    const drink = pick(breakfastDrinkPool(base, addonPool), index + 9, used, addonPool);
     used.add(base.id); used.add(addon.id);
 
     meals.push({
       id: `${date}-breakfast`, date, kind: "breakfast", title: "Завтрак", source: "generated",
-      components: [{ slot: "base", dishId: base.id }, { slot: "addon", dishId: addon.id }, { slot: "drink", dishId: pick(addonPool, index + 9, used, addonPool).id }],
+      components: [{ slot: "base", dishId: base.id }, { slot: "addon", dishId: addon.id }, { slot: "drink", dishId: drink.id }],
       notes: "Основа + дополнение + напиток/фрукт/овощи. Сладкая выпечка только как добавка.",
     });
 
@@ -103,6 +131,34 @@ export function replaceComponent(state: AppState, mealId: string, slot: MealComp
     if (!next) return meal;
     return { ...meal, components: meal.components.map((component) => component.slot === slot ? { ...component, dishId: next.id } : component) };
   });
+  return { ...state, meals, shopping: buildShoppingList({ ...state, meals }) };
+}
+
+export function replacementOptions(state: AppState, mealId: string, slot: MealComponent["slot"]): DishComponent[] {
+  const meal = state.meals.find((item) => item.id === mealId);
+  const current = meal?.components.find((component) => component.slot === slot);
+  const currentDish = current ? state.dishes.find((dish) => dish.id === current.dishId) : undefined;
+  const roleToUse = currentDish?.role;
+  if (!roleToUse) return [];
+  let candidates = role(state.dishes, roleToUse, state.bannedDishIds).filter((dish) => dish.id !== currentDish.id);
+  if (meal?.kind === "breakfast" && slot === "addon") {
+    const baseId = meal.components.find((component) => component.slot === "base")?.dishId;
+    const base = state.dishes.find((dish) => dish.id === baseId);
+    if (base) candidates = breakfastAddonPool(base, candidates);
+  }
+  if (meal?.kind === "breakfast" && slot === "drink") {
+    const baseId = meal.components.find((component) => component.slot === "base")?.dishId;
+    const base = state.dishes.find((dish) => dish.id === baseId);
+    if (base) candidates = breakfastDrinkPool(base, candidates);
+  }
+  return candidates.slice(0, 12);
+}
+
+export function replaceComponentWithDish(state: AppState, mealId: string, slot: MealComponent["slot"], dishId: string): AppState {
+  const meals = state.meals.map((meal) => meal.id === mealId ? {
+    ...meal,
+    components: meal.components.map((component) => component.slot === slot ? { ...component, dishId } : component),
+  } : meal);
   return { ...state, meals, shopping: buildShoppingList({ ...state, meals }) };
 }
 

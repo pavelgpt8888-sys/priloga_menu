@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { initialState } from "@/lib/demo-data";
-import { addManualShoppingItem, applyQuickScenario, banDish, buildShoppingList, byId, generateWeek, mealLabel, parseCommand, removeComponent, replaceComponent, startOfToday } from "@/lib/planner";
+import { addManualShoppingItem, applyQuickScenario, banDish, buildShoppingList, byId, generateWeek, mealLabel, parseCommand, removeComponent, replaceComponent, replacementOptions, replaceComponentWithDish, startOfToday } from "@/lib/planner";
 import type { AppState, CookingSession, DishComponent, MealComponent, MealPlan, ShoppingItem } from "@/lib/types";
 
 const storageKey = "family-meal-planner-state-v1";
@@ -19,6 +19,31 @@ const quick = ["Нет времени", "Использовать остатки
 const slotLabels: Record<MealComponent["slot"], string> = {
   base: "основа", addon: "дополнение", drink: "напиток/фрукт/овощи", main: "основное", side: "гарнир", salad: "салат взрослым", kidsVegetables: "овощи детям", soup: "суп", dessert: "десерт",
 };
+
+const foodPhotos: Record<string, string> = {
+  breakfast_base: "https://images.unsplash.com/photo-1517673400267-0251440c45dc?auto=format&fit=crop&w=520&q=78",
+  breakfast_addon: "https://images.unsplash.com/photo-1568702846914-96b305d2aaeb?auto=format&fit=crop&w=520&q=78",
+  main: "https://images.unsplash.com/photo-1598515214211-89d3c73ae83b?auto=format&fit=crop&w=520&q=78",
+  side: "https://images.unsplash.com/photo-1516684669134-de6f7c473a2a?auto=format&fit=crop&w=520&q=78",
+  salad: "https://images.unsplash.com/photo-1540420773420-3366772f4999?auto=format&fit=crop&w=520&q=78",
+  kids_vegetables: "https://images.unsplash.com/photo-1540420773420-3366772f4999?auto=format&fit=crop&w=520&q=78",
+  soup: "https://images.unsplash.com/photo-1547592166-23ac45744acd?auto=format&fit=crop&w=520&q=78",
+  dessert: "https://images.unsplash.com/photo-1488477181946-6428a0291777?auto=format&fit=crop&w=520&q=78",
+  snack: "https://images.unsplash.com/photo-1528735602780-2552fd46c7af?auto=format&fit=crop&w=520&q=78",
+  leftover_based: "https://images.unsplash.com/photo-1495521821757-a1efb6729352?auto=format&fit=crop&w=520&q=78",
+  freezer_item: "https://images.unsplash.com/photo-1601599963565-b7ba29c8e056?auto=format&fit=crop&w=520&q=78",
+};
+
+function photoForDish(dish: DishComponent) {
+  const name = dish.name.toLowerCase();
+  if (name.includes("каша") || name.includes("овсян")) return "https://images.unsplash.com/photo-1517673400267-0251440c45dc?auto=format&fit=crop&w=520&q=78";
+  if (name.includes("сыр") || name.includes("творог")) return "https://images.unsplash.com/photo-1452195100486-9cc805987862?auto=format&fit=crop&w=520&q=78";
+  if (name.includes("чай") || name.includes("какао")) return "https://images.unsplash.com/photo-1544787219-7f47ccb76574?auto=format&fit=crop&w=520&q=78";
+  if (name.includes("банан") || name.includes("яблок")) return "https://images.unsplash.com/photo-1568702846914-96b305d2aaeb?auto=format&fit=crop&w=520&q=78";
+  if (name.includes("кур")) return "https://images.unsplash.com/photo-1598515214211-89d3c73ae83b?auto=format&fit=crop&w=520&q=78";
+  if (name.includes("рис")) return "https://images.unsplash.com/photo-1536304993881-ff6e9eefa2a6?auto=format&fit=crop&w=520&q=78";
+  return foodPhotos[dish.role];
+}
 
 function seededState(): AppState {
   const base = { ...initialState, meals: generateWeek(initialState) };
@@ -32,6 +57,7 @@ export default function HomePage() {
   const [undo, setUndo] = useState<AppState | null>(null);
   const [command, setCommand] = useState("");
   const [manualProduct, setManualProduct] = useState("");
+  const [replaceRequest, setReplaceRequest] = useState<{ meal: MealPlan; slot: MealComponent["slot"] } | null>(null);
 
   const dishMap = useMemo(() => byId(state.dishes), [state.dishes]);
   const today = startOfToday().toISOString().slice(0, 10);
@@ -128,8 +154,8 @@ export default function HomePage() {
 
           {toast && <div className="flex flex-col gap-3 rounded-2xl border border-[#b9d6b8] bg-[#edf7ed] p-4 text-sm font-semibold text-[#285f3b] shadow-[0_12px_30px_rgba(63,125,82,0.10)] sm:flex-row sm:items-center sm:justify-between"><span>{toast}</span>{undo && <Button variant="outline" size="sm" onClick={() => { setState(undo); setUndo(null); setToast("Отменено. Вернули предыдущее состояние."); }}><RotateCcw size={16} />Отменить</Button>}</div>}
 
-          {active === "Сегодня" && <TodayView meals={todayMeals} shopping={state.shopping} dishMap={dishMap} onOpenShopping={() => setActive("Покупки")} onReplace={(meal, slot) => commit(replaceComponent(state, meal.id, slot), `Заменили ${slotLabels[slot]}.`)} onRemove={(meal, slot) => commit(removeComponent(state, meal.id, slot), `Убрали ${slotLabels[slot]}.`)} onMove={moveMeal} onRepeat={repeatMeal} onShop={addMealToShopping} onBan={(dish) => commit(banDish(state, dish.id), `${dish.name}: пока не предлагаем.`)} onCook={startCooking} onQuick={handleQuick} />}
-          {active === "Меню" && <MenuView meals={state.meals} dishMap={dishMap} regenerate={regenerate} onReplace={(meal, slot) => commit(replaceComponent(state, meal.id, slot), `Заменили ${slotLabels[slot]} в календаре.`)} />}
+          {active === "Сегодня" && <TodayView meals={todayMeals} shopping={state.shopping} dishMap={dishMap} onOpenShopping={() => setActive("Покупки")} onReplace={(meal, slot) => setReplaceRequest({ meal, slot })} onRemove={(meal, slot) => commit(removeComponent(state, meal.id, slot), `Убрали ${slotLabels[slot]}.`)} onMove={moveMeal} onRepeat={repeatMeal} onShop={addMealToShopping} onBan={(dish) => commit(banDish(state, dish.id), `${dish.name}: пока не предлагаем.`)} onCook={startCooking} onQuick={handleQuick} />}
+          {active === "Меню" && <MenuView meals={state.meals} dishMap={dishMap} regenerate={regenerate} onReplace={(meal, slot) => setReplaceRequest({ meal, slot })} />}
           {active === "Блюда" && <DishesView dishes={state.dishes} onBan={(dish) => commit(banDish(state, dish.id), `${dish.name}: скрыто из предложений.`)} />}
           {active === "Семья" && <FamilyView state={state} />}
           {active === "Кухня" && <KitchenView state={state} dishMap={dishMap} commit={commit} />}
@@ -144,6 +170,7 @@ export default function HomePage() {
       <nav className="fixed inset-x-0 bottom-0 z-20 grid grid-cols-5 gap-1 border-t border-border bg-[#FFFDF8]/95 p-2 backdrop-blur lg:hidden">
         {sections.slice(0, 10).map(([name, Icon]) => <button key={name} onClick={() => setActive(name)} className={`flex min-h-12 flex-col items-center justify-center rounded-xl text-[11px] font-bold ${active === name ? "bg-primary text-white" : "text-[#40504A]"}`}><Icon size={17} /><span className="max-w-full truncate">{name}</span></button>)}
       </nav>
+      {replaceRequest && <ReplaceDialog state={state} request={replaceRequest} onClose={() => setReplaceRequest(null)} onPick={(dishId) => { commit(replaceComponentWithDish(state, replaceRequest.meal.id, replaceRequest.slot, dishId), `Заменили ${slotLabels[replaceRequest.slot]} вручную.`); setReplaceRequest(null); }} onAuto={() => { commit(replaceComponent(state, replaceRequest.meal.id, replaceRequest.slot), `Подобрали замену для ${slotLabels[replaceRequest.slot]}.`); setReplaceRequest(null); }} />}
     </main>
   );
 }
@@ -174,7 +201,10 @@ function MealCard({ meal, dishMap, onReplace, onRemove, onMove, onRepeat, onShop
         if (!dish) return null;
         return <div key={`${meal.id}-${component.slot}`} className="rounded-2xl border border-[#e2d6c4] bg-[#fffdf6] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.75)]">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div><p className="text-xs font-bold uppercase tracking-wide text-[#5F6B66]">{slotLabels[component.slot]}</p><p className="text-lg font-black">{dish.name}</p><p className="text-sm text-muted-foreground">{dish.effort === "easy" ? "быстро" : dish.effort === "weekend" ? "лучше на выходные" : "обычно"} · {dish.cost === "low" ? "недорого" : "средняя цена"}</p></div>
+            <div className="flex min-w-0 items-center gap-4">
+              <img src={photoForDish(dish)} alt="" className="h-20 w-24 shrink-0 rounded-2xl object-cover shadow-[0_8px_20px_rgba(129,83,43,0.16)]" />
+              <div><p className="text-xs font-bold uppercase tracking-wide text-[#5F6B66]">{slotLabels[component.slot]}</p><p className="text-lg font-black">{dish.name}</p><p className="text-sm text-muted-foreground">{dish.effort === "easy" ? "быстро" : dish.effort === "weekend" ? "лучше на выходные" : "обычно"} · {dish.cost === "low" ? "недорого" : "средняя цена"}</p></div>
+            </div>
             <div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" onClick={() => onReplace(meal, component.slot)}>Заменить</Button><Button variant="ghost" size="sm" onClick={() => onRemove(meal, component.slot)}>Убрать</Button><Button variant="ghost" size="sm" onClick={() => onBan(dish)}>Не предлагать пока</Button></div>
           </div>
         </div>;
@@ -213,7 +243,7 @@ function ShoppingView({ state, setState, commit, manualProduct, setManualProduct
   return <div className="space-y-4"><form className="flex gap-2" onSubmit={(event) => { event.preventDefault(); commit(addManualShoppingItem(state, manualProduct), "Добавили вручную в покупки."); setManualProduct(""); }}><Input value={manualProduct} onChange={(event) => setManualProduct(event.target.value)} placeholder="Добавить вручную: молоко, хлеб, салфетки" /><Button>Добавить</Button></form>{Object.entries(grouped).map(([category, items]) => <Card key={category}><CardHeader><CardTitle>{category}</CardTitle></CardHeader><CardContent className="space-y-2">{items?.map((item) => <div key={item.id} className="flex flex-col gap-3 rounded-xl bg-white p-3 sm:flex-row sm:items-center sm:justify-between"><label className="flex items-center gap-3 font-semibold"><input type="checkbox" checked={item.checked} onChange={(event) => update(item, { checked: event.target.checked })} />{item.product} · {item.amount} {item.unit}</label><div className="flex flex-wrap gap-2"><Button variant="ghost" size="sm" onClick={() => update(item, { alreadyAtHome: !item.alreadyAtHome })}>{item.alreadyAtHome ? "Уже есть" : "Есть дома"}</Button><Button variant="ghost" size="sm" onClick={() => update(item, { amount: Math.max(0.5, item.amount - 1) })}>Меньше</Button><Button variant="ghost" size="sm" onClick={() => update(item, { amount: item.amount + 1 })}>Больше</Button><Button variant="danger" size="sm" onClick={() => setState({ ...state, shopping: state.shopping.filter((entry) => entry.id !== item.id) })}>Удалить</Button></div></div>)}</CardContent></Card>)}</div>;
 }
 
-function SettingsView({ state, reset }: { state: AppState; reset: () => void }) { return <div className="grid gap-4 xl:grid-cols-2"><Card><CardHeader><CardTitle>Настройки MVP</CardTitle></CardHeader><CardContent className="space-y-3"><p className="text-muted-foreground">Данные хранятся локально в браузере. Supabase-поля и модели подготовлены для следующего этапа.</p><Button variant="outline" onClick={reset}>Сбросить демо-данные</Button><details className="rounded-xl border border-border bg-white p-4"><summary className="cursor-pointer font-bold">Настроить подробнее</summary><p className="mt-3 text-sm text-muted-foreground">Позже здесь будут профили питания, лимиты бюджета, синхронизация и AI-фото холодильника.</p></details></CardContent></Card><Card><CardHeader><CardTitle>Импорт рецепта по ссылке</CardTitle></CardHeader><CardContent className="space-y-3"><Input placeholder="Ссылка на рецепт" defaultValue={state.recipes[0]?.url} /><Input placeholder="Название черновика" defaultValue={state.recipes[0]?.title} /><Textarea placeholder="Ингредиенты вручную. Позже сюда подключится schema.org Recipe parser." /><Textarea placeholder="Шаги приготовления" /><Button variant="soft">Сохранить черновик</Button></CardContent></Card></div>; }
+function SettingsView({ state, reset }: { state: AppState; reset: () => void }) { return <div className="grid gap-4 xl:grid-cols-2"><Card><CardHeader><CardTitle>Настройки MVP</CardTitle></CardHeader><CardContent className="space-y-3"><p className="text-muted-foreground">Данные хранятся локально в браузере. Supabase-поля и модели подготовлены для следующего этапа.</p><Button variant="outline" onClick={reset}>Сбросить демо-данные</Button><details className="rounded-xl border border-border bg-white p-4"><summary className="cursor-pointer font-bold">Настроить подробнее</summary><p className="mt-3 text-sm text-muted-foreground">Позже здесь будут профили питания, лимиты бюджета, синхронизация и AI-фото холодильника.</p></details></CardContent></Card><Card><CardHeader><CardTitle>Мои вкусы и любимые блюда</CardTitle></CardHeader><CardContent className="space-y-3"><Textarea placeholder="Надиктуйте или напишите: что любите, что дети не едят, какие завтраки нормальные, какие блюда хочется чаще. Например: люблю сырники, курицу в духовке, салат огурцы-помидоры; не ставь какао к гречневой каше." /><div className="grid gap-2 sm:grid-cols-2"><Button variant="soft">🎙️ Надиктовать вкусы</Button><Button variant="outline">📷 Добавить блюдо по фото</Button></div><p className="text-sm text-muted-foreground">MVP сохраняет это как будущий сценарий. Следующий этап: голос → текст → вкусовой профиль; фото блюда → подтверждение → любимые блюда.</p></CardContent></Card><Card><CardHeader><CardTitle>Импорт рецепта по ссылке</CardTitle></CardHeader><CardContent className="space-y-3"><Input placeholder="Ссылка на рецепт" defaultValue={state.recipes[0]?.url} /><Input placeholder="Название черновика" defaultValue={state.recipes[0]?.title} /><Textarea placeholder="Ингредиенты вручную. Позже сюда подключится schema.org Recipe parser." /><Textarea placeholder="Шаги приготовления" /><Button variant="soft">Сохранить черновик</Button></CardContent></Card></div>; }
 
 function ShoppingPreview({ items, onOpen }: { items: ShoppingItem[]; onOpen: () => void }) {
   const visible = items.filter((item) => !item.checked && !item.alreadyAtHome).slice(0, 6);
@@ -235,6 +265,30 @@ function ShoppingPreview({ items, onOpen }: { items: ShoppingItem[]; onOpen: () 
       {items.length > visible.length ? <p className="mt-3 text-sm font-semibold text-[#4F7C5D]">Еще позиций: {items.length - visible.length}</p> : null}
     </CardContent>
   </Card>;
+}
+
+function ReplaceDialog({ state, request, onClose, onPick, onAuto }: { state: AppState; request: { meal: MealPlan; slot: MealComponent["slot"] }; onClose: () => void; onPick: (dishId: string) => void; onAuto: () => void }) {
+  const options = replacementOptions(state, request.meal.id, request.slot);
+  return <div className="fixed inset-0 z-40 grid place-items-center bg-[#2f2a24]/45 p-4 backdrop-blur-sm">
+    <Card className="max-h-[86vh] w-full max-w-4xl overflow-hidden">
+      <CardHeader className="flex flex-row items-start justify-between gap-4 border-b border-[#ead7bd] bg-[#fff4e6]">
+        <div>
+          <CardTitle>Выбрать замену: {slotLabels[request.slot]}</CardTitle>
+          <p className="text-sm text-muted-foreground">Показываю варианты той же роли и с учетом завтрака/ужина.</p>
+        </div>
+        <div className="flex gap-2"><Button variant="soft" size="sm" onClick={onAuto}>Подобрать само</Button><Button variant="outline" size="sm" onClick={onClose}>Закрыть</Button></div>
+      </CardHeader>
+      <CardContent className="max-h-[68vh] overflow-y-auto pt-5">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {options.map((dish) => <button key={dish.id} onClick={() => onPick(dish.id)} className="rounded-2xl border border-[#ead7bd] bg-[#fffaf2] p-3 text-left transition hover:-translate-y-0.5 hover:border-[#f47b58] hover:shadow-[0_14px_28px_rgba(129,83,43,0.13)]">
+            <img src={photoForDish(dish)} alt="" className="mb-3 h-28 w-full rounded-xl object-cover" />
+            <p className="font-black">{dish.name}</p>
+            <p className="text-sm text-muted-foreground">{dish.effort === "easy" ? "быстро" : dish.effort === "weekend" ? "на выходные" : "обычно"} · {dish.kidsFriendly ? "детям ок" : "скорее взрослым"}</p>
+          </button>)}
+        </div>
+      </CardContent>
+    </Card>
+  </div>;
 }
 
 function InfoCard({ title, items, tone = "default" }: { title: string; items: string[]; tone?: "default" | "tip" | "success" }) { return <Card className={tone === "tip" ? "border-[#e2bf6b] bg-gradient-to-br from-[#fff1c9] to-[#fff9e9]" : tone === "success" ? "border-[#b9d6b8] bg-gradient-to-br from-[#edf7ed] to-[#f8fff5]" : ""}><CardHeader><CardTitle>{title}</CardTitle></CardHeader><CardContent><ul className="space-y-2 text-sm text-[#40504A]">{items.map((item) => <li key={item} className="flex gap-2"><ListChecks className="mt-0.5 size-4 shrink-0 text-primary" />{item}</li>)}</ul></CardContent></Card>; }
