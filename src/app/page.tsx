@@ -248,6 +248,9 @@ function MealCard({ meal, dishMap, onReplace, onRemove, onMove, onRepeat, onShop
 }
 
 function MenuView({ state, dishMap, regenerate, onReplace, onPlanTomorrow, onOpenShopping }: { state: AppState; dishMap: Map<string, DishComponent>; regenerate: (mode?: Parameters<typeof generateWeek>[1]) => void; onReplace: (meal: MealPlan, slot: MealComponent["slot"]) => void; onPlanTomorrow: (recipe: RecipeEntry, kind: MealKind) => void; onOpenShopping: () => void; }) {
+  const todayIso = startOfToday().toISOString().slice(0, 10);
+  const [calendarMode, setCalendarMode] = useState<"day" | "week" | "month">("week");
+  const [selectedDate, setSelectedDate] = useState(todayIso);
   const [breakfastId, setBreakfastId] = useState(state.recipes.find((recipe) => recipe.categories.includes("завтраки"))?.id ?? state.recipes[0]?.id ?? "");
   const [dinnerId, setDinnerId] = useState(state.recipes.find((recipe) => recipe.categories.includes("ужины"))?.id ?? state.recipes[0]?.id ?? "");
   const grouped = Object.groupBy(state.meals, (meal) => meal.date);
@@ -255,10 +258,22 @@ function MenuView({ state, dishMap, regenerate, onReplace, onPlanTomorrow, onOpe
   tomorrow.setDate(tomorrow.getDate() + 1);
   const tomorrowIso = tomorrow.toISOString().slice(0, 10);
   const tomorrowMeals = state.meals.filter((meal) => meal.date === tomorrowIso);
+  const selectedDayMeals = state.meals.filter((meal) => meal.date === selectedDate);
   const breakfastRecipes = state.recipes.filter((recipe) => recipe.categories.includes("завтраки") || recipe.title.toLowerCase().includes("сырник") || recipe.title.toLowerCase().includes("каша"));
   const dinnerRecipes = state.recipes.filter((recipe) => recipe.categories.includes("ужины") || recipe.categories.includes("супы") || recipe.categories.includes("мои рецепты"));
   const selectedBreakfast = state.recipes.find((recipe) => recipe.id === breakfastId) ?? breakfastRecipes[0] ?? state.recipes[0];
   const selectedDinner = state.recipes.find((recipe) => recipe.id === dinnerId) ?? dinnerRecipes[0] ?? state.recipes[0];
+  const monthStart = new Date(startOfToday());
+  monthStart.setDate(1);
+  const monthDays = Array.from({ length: new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0).getDate() }, (_, index) => {
+    const date = new Date(monthStart);
+    date.setDate(index + 1);
+    return date.toISOString().slice(0, 10);
+  });
+
+  function mealNames(meal: MealPlan) {
+    return meal.components.map((component) => dishMap.get(component.dishId)?.name).filter(Boolean).join(", ");
+  }
 
   return <div className="space-y-4">
     <Card className="border-[#e2bf6b] bg-gradient-to-br from-[#fffaf0] to-[#edf7ed]">
@@ -299,7 +314,48 @@ function MenuView({ state, dishMap, regenerate, onReplace, onPlanTomorrow, onOpe
     </Card>
 
     <div className="flex flex-wrap gap-2"><Button onClick={() => regenerate("balanced")}>Сгенерировать неделю</Button><Button variant="soft" onClick={() => regenerate("simple")}>Будни проще</Button><Button variant="soft" onClick={() => regenerate("leftovers")}>Использовать остатки</Button><Button variant="soft" onClick={() => regenerate("freezer")}>Взять из морозилки</Button></div>
-    <div className="grid gap-4 xl:grid-cols-2">{Object.entries(grouped).map(([date, dayMeals]) => <Card key={date}><CardHeader><CardTitle>{new Date(date).toLocaleDateString("ru-RU", { weekday: "long", day: "numeric", month: "long" })}</CardTitle></CardHeader><CardContent className="space-y-3">{dayMeals?.map((meal) => <div key={meal.id} className="rounded-2xl bg-white p-4"><p className="font-black">{mealLabel(meal.kind)}</p>{meal.components.map((component) => <button key={component.slot} onClick={() => onReplace(meal, component.slot)} className="mt-2 block w-full rounded-xl border border-border px-3 py-2 text-left text-sm hover:bg-[#FFF3D6]"><b>{slotLabels[component.slot]}:</b> {dishMap.get(component.dishId)?.name}</button>)}</div>)}</CardContent></Card>)}</div>
+
+    <Card>
+      <CardHeader className="space-y-3">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <CardTitle>Календарь меню</CardTitle>
+            <p className="text-sm text-muted-foreground">Как в Paprika: день, неделя и месяц. Пока без перетаскивания, но уже с обзором.</p>
+          </div>
+          <div className="grid grid-cols-3 gap-2 rounded-2xl bg-[#fffaf2] p-1">
+            {(["day", "week", "month"] as const).map((mode) => <button key={mode} onClick={() => setCalendarMode(mode)} className={`rounded-xl px-3 py-2 text-sm font-black ${calendarMode === mode ? "bg-[#4F7C5D] text-white shadow-sm" : "text-[#40504A] hover:bg-white"}`}>{mode === "day" ? "День" : mode === "week" ? "Неделя" : "Месяц"}</button>)}
+          </div>
+        </div>
+        {calendarMode === "day" && <label className="grid max-w-xs gap-1 text-sm font-semibold">Дата
+          <Input type="date" value={selectedDate} onChange={(event) => setSelectedDate(event.target.value)} />
+        </label>}
+      </CardHeader>
+      <CardContent>
+        {calendarMode === "day" && <div className="space-y-3">
+          <h3 className="text-xl font-black">{new Date(selectedDate).toLocaleDateString("ru-RU", { weekday: "long", day: "numeric", month: "long" })}</h3>
+          {selectedDayMeals.length ? selectedDayMeals.map((meal) => <div key={meal.id} className="rounded-2xl bg-white p-4"><p className="font-black">{mealLabel(meal.kind)}</p>{meal.components.map((component) => <button key={component.slot} onClick={() => onReplace(meal, component.slot)} className="mt-2 block w-full rounded-xl border border-border px-3 py-2 text-left text-sm hover:bg-[#FFF3D6]"><b>{slotLabels[component.slot]}:</b> {dishMap.get(component.dishId)?.name}</button>)}</div>) : <p className="rounded-2xl bg-[#fffaf2] p-4 text-sm text-muted-foreground">На этот день меню пока не запланировано.</p>}
+        </div>}
+
+        {calendarMode === "week" && <div className="grid gap-4 xl:grid-cols-2">{Object.entries(grouped).map(([date, dayMeals]) => <Card key={date}><CardHeader><CardTitle>{new Date(date).toLocaleDateString("ru-RU", { weekday: "long", day: "numeric", month: "long" })}</CardTitle></CardHeader><CardContent className="space-y-3">{dayMeals?.map((meal) => <div key={meal.id} className="rounded-2xl bg-white p-4"><p className="font-black">{mealLabel(meal.kind)}</p>{meal.components.map((component) => <button key={component.slot} onClick={() => onReplace(meal, component.slot)} className="mt-2 block w-full rounded-xl border border-border px-3 py-2 text-left text-sm hover:bg-[#FFF3D6]"><b>{slotLabels[component.slot]}:</b> {dishMap.get(component.dishId)?.name}</button>)}</div>)}</CardContent></Card>)}</div>}
+
+        {calendarMode === "month" && <div className="space-y-3">
+          <div className="grid grid-cols-7 gap-2 text-center text-xs font-black uppercase text-[#5F6B66]">
+            {["пн", "вт", "ср", "чт", "пт", "сб", "вс"].map((day) => <span key={day}>{day}</span>)}
+          </div>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-7">
+            {monthDays.map((date) => {
+              const meals = grouped[date] ?? [];
+              return <button key={date} onClick={() => { setSelectedDate(date); setCalendarMode("day"); }} className={`min-h-32 rounded-2xl border p-3 text-left transition hover:-translate-y-0.5 hover:shadow-[0_12px_26px_rgba(129,83,43,0.10)] ${date === todayIso ? "border-[#4F7C5D] bg-[#edf7ed]" : "border-[#ead7bd] bg-[#fffdf6]"}`}>
+                <p className="font-black">{new Date(date).toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}</p>
+                <div className="mt-2 space-y-1">
+                  {meals.length ? meals.slice(0, 3).map((meal) => <p key={meal.id} className="line-clamp-2 rounded-lg bg-white/85 px-2 py-1 text-xs"><b>{mealLabel(meal.kind)}:</b> {mealNames(meal)}</p>) : <p className="text-xs text-muted-foreground">пусто</p>}
+                </div>
+              </button>;
+            })}
+          </div>
+        </div>}
+      </CardContent>
+    </Card>
   </div>;
 }
 
