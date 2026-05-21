@@ -1,4 +1,4 @@
-import type { AppState, DishComponent, DishRole, MealComponent, MealKind, MealPlan, RecipeEntry, ShoppingItem } from "./types";
+import type { AppState, DishComponent, DishRole, MealComponent, MealKind, MealPlan, RecipeEntry, ShoppingItem, StoragePlace } from "./types";
 
 const dayMs = 24 * 60 * 60 * 1000;
 const iso = (date: Date) => date.toISOString().slice(0, 10);
@@ -223,6 +223,38 @@ export function addRecipeToShopping(state: AppState, recipe: RecipeEntry): AppSt
     });
   });
   return { ...state, shopping };
+}
+
+function storagePlaceForShoppingItem(item: ShoppingItem): StoragePlace {
+  if (item.category === "заморозка") return "freezer";
+  if (["молочные", "мясо и птица", "рыба"].includes(item.category)) return "fridge";
+  return "pantry";
+}
+
+export function moveCheckedShoppingToInventory(state: AppState): AppState {
+  const checked = state.shopping.filter((item) => item.checked && !item.alreadyAtHome);
+  if (!checked.length) return state;
+  const inventory = [...state.inventory];
+
+  checked.forEach((item) => {
+    const existing = inventory.find((entry) =>
+      entry.product.toLowerCase() === item.product.toLowerCase()
+      && entry.unit === item.unit
+      && entry.place === storagePlaceForShoppingItem(item)
+    );
+    if (existing) existing.amount += item.amount;
+    else inventory.push({
+      id: `inv-shopping-${item.product.toLowerCase()}-${Date.now()}`,
+      product: item.product,
+      amount: item.amount,
+      unit: item.unit,
+      category: item.category,
+      place: storagePlaceForShoppingItem(item),
+      source: "shopping",
+    });
+  });
+
+  return { ...state, inventory, shopping: state.shopping.filter((item) => !item.checked) };
 }
 
 function slotForDishRole(roleToUse: DishRole): MealComponent["slot"] {
