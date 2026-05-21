@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { CalendarDays, ChefHat, Heart, Home, IceCreamBowl, ListChecks, Plus, RotateCcw, Settings, ShoppingBasket, Snowflake, Soup, Star, Users, Warehouse } from "lucide-react";
+import { CalendarDays, Camera, ChefHat, Heart, Home, IceCreamBowl, ListChecks, Plus, RotateCcw, Settings, ShoppingBasket, Snowflake, Soup, Sparkles, Star, Upload, Users, Warehouse } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -19,31 +19,6 @@ const quick = ["Нет времени", "Использовать остатки
 const slotLabels: Record<MealComponent["slot"], string> = {
   base: "основа", addon: "дополнение", drink: "напиток/фрукт/овощи", main: "основное", side: "гарнир", salad: "салат взрослым", kidsVegetables: "овощи детям", soup: "суп", dessert: "десерт",
 };
-
-const foodPhotos: Record<string, string> = {
-  breakfast_base: "https://images.unsplash.com/photo-1517673400267-0251440c45dc?auto=format&fit=crop&w=520&q=78",
-  breakfast_addon: "https://images.unsplash.com/photo-1568702846914-96b305d2aaeb?auto=format&fit=crop&w=520&q=78",
-  main: "https://images.unsplash.com/photo-1598515214211-89d3c73ae83b?auto=format&fit=crop&w=520&q=78",
-  side: "https://images.unsplash.com/photo-1516684669134-de6f7c473a2a?auto=format&fit=crop&w=520&q=78",
-  salad: "https://images.unsplash.com/photo-1540420773420-3366772f4999?auto=format&fit=crop&w=520&q=78",
-  kids_vegetables: "https://images.unsplash.com/photo-1540420773420-3366772f4999?auto=format&fit=crop&w=520&q=78",
-  soup: "https://images.unsplash.com/photo-1547592166-23ac45744acd?auto=format&fit=crop&w=520&q=78",
-  dessert: "https://images.unsplash.com/photo-1488477181946-6428a0291777?auto=format&fit=crop&w=520&q=78",
-  snack: "https://images.unsplash.com/photo-1528735602780-2552fd46c7af?auto=format&fit=crop&w=520&q=78",
-  leftover_based: "https://images.unsplash.com/photo-1495521821757-a1efb6729352?auto=format&fit=crop&w=520&q=78",
-  freezer_item: "https://images.unsplash.com/photo-1601599963565-b7ba29c8e056?auto=format&fit=crop&w=520&q=78",
-};
-
-function photoForDish(dish: DishComponent) {
-  const name = dish.name.toLowerCase();
-  if (name.includes("каша") || name.includes("овсян")) return "https://images.unsplash.com/photo-1517673400267-0251440c45dc?auto=format&fit=crop&w=520&q=78";
-  if (name.includes("сыр") || name.includes("творог")) return "https://images.unsplash.com/photo-1452195100486-9cc805987862?auto=format&fit=crop&w=520&q=78";
-  if (name.includes("чай") || name.includes("какао")) return "https://images.unsplash.com/photo-1544787219-7f47ccb76574?auto=format&fit=crop&w=520&q=78";
-  if (name.includes("банан") || name.includes("яблок")) return "https://images.unsplash.com/photo-1568702846914-96b305d2aaeb?auto=format&fit=crop&w=520&q=78";
-  if (name.includes("кур")) return "https://images.unsplash.com/photo-1598515214211-89d3c73ae83b?auto=format&fit=crop&w=520&q=78";
-  if (name.includes("рис")) return "https://images.unsplash.com/photo-1536304993881-ff6e9eefa2a6?auto=format&fit=crop&w=520&q=78";
-  return foodPhotos[dish.role];
-}
 
 function seededState(): AppState {
   const base = { ...initialState, meals: generateWeek(initialState) };
@@ -220,6 +195,20 @@ function TodayView(props: { meals: MealPlan[]; shopping: ShoppingItem[]; dishMap
   </div>;
 }
 
+function DishVisual({ dish, compact = false }: { dish: DishComponent; compact?: boolean }) {
+  const tone = dish.role === "main" || dish.role === "freezer_item" ? "from-[#fff0d9] via-[#fffaf2] to-[#edf7ed]" : dish.role === "soup" ? "from-[#ffe8d7] via-[#fffaf2] to-[#fff3d6]" : dish.role === "salad" || dish.role === "kids_vegetables" ? "from-[#edf7ed] via-[#fffdf6] to-[#fff3d6]" : "from-[#fff3d6] via-[#fffdf6] to-[#edf7ed]";
+  const ingredients = dish.ingredients.map((item) => item.name).slice(0, compact ? 2 : 4).join(" · ");
+  return <div className={`relative grid shrink-0 place-items-center overflow-hidden rounded-2xl border border-[#ead7bd] bg-gradient-to-br ${tone} p-3 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] ${compact ? "h-20 w-24" : "h-44 w-full"}`}>
+    <div className="absolute -right-5 -top-5 size-20 rounded-full bg-[#f47b58]/15" />
+    <div className="absolute -bottom-6 -left-6 size-24 rounded-full bg-[#4f7c5d]/10" />
+    <div className="relative space-y-1">
+      <ChefHat className="mx-auto size-5 text-[#f47b58]" />
+      <p className={`${compact ? "text-xs" : "text-base"} font-black leading-tight text-[#263238]`}>{dish.name}</p>
+      {!compact && <p className="text-xs font-semibold text-[#5f6b66]">{ingredients}</p>}
+    </div>
+  </div>;
+}
+
 function MealCard({ meal, dishMap, onReplace, onRemove, onMove, onRepeat, onShop, onBan, onCook }: { meal: MealPlan; dishMap: Map<string, DishComponent>; onReplace: (meal: MealPlan, slot: MealComponent["slot"]) => void; onRemove: (meal: MealPlan, slot: MealComponent["slot"]) => void; onMove: (meal: MealPlan) => void; onRepeat: (meal: MealPlan) => void; onShop: (meal: MealPlan) => void; onBan: (dish: DishComponent) => void; onCook: (meal: MealPlan) => void; }) {
   return <Card>
     <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -233,7 +222,7 @@ function MealCard({ meal, dishMap, onReplace, onRemove, onMove, onRepeat, onShop
         return <div key={`${meal.id}-${component.slot}`} className="rounded-2xl border border-[#e2d6c4] bg-[#fffdf6] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.75)]">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex min-w-0 items-center gap-4">
-              <img src={photoForDish(dish)} alt="" className="h-20 w-24 shrink-0 rounded-2xl object-cover shadow-[0_8px_20px_rgba(129,83,43,0.16)]" />
+              <DishVisual dish={dish} compact />
               <div><p className="text-xs font-bold uppercase tracking-wide text-[#5F6B66]">{slotLabels[component.slot]}</p><p className="text-lg font-black">{dish.name}</p><p className="text-sm text-muted-foreground">{dish.effort === "easy" ? "быстро" : dish.effort === "weekend" ? "лучше на выходные" : "обычно"} · {dish.cost === "low" ? "недорого" : "средняя цена"}</p></div>
             </div>
             <div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" onClick={() => onReplace(meal, component.slot)}>Заменить</Button><Button variant="ghost" size="sm" onClick={() => onRemove(meal, component.slot)}>Убрать</Button><Button variant="ghost" size="sm" onClick={() => onBan(dish)}>Не предлагать пока</Button></div>
@@ -361,12 +350,21 @@ function MenuView({ state, dishMap, regenerate, onReplace, onPlanMeal, onMoveMea
 function DishesView({ state, setState, dishMap, onBan, onRecipeToMenu, onRecipeToShopping }: { state: AppState; setState: (state: AppState) => void; dishMap: Map<string, DishComponent>; onBan: (dish: DishComponent) => void; onRecipeToMenu: (recipe: RecipeEntry) => void; onRecipeToShopping: (recipe: RecipeEntry) => void }) {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("все");
+  const [quickFilter, setQuickFilter] = useState("все");
   const [selectedId, setSelectedId] = useState(state.recipes[0]?.id ?? "");
   const [editing, setEditing] = useState(false);
+  const [photoFileName, setPhotoFileName] = useState("");
+  const [photoDraftText, setPhotoDraftText] = useState("");
   const categories = ["все", ...Array.from(new Set(state.recipes.flatMap((recipe) => recipe.categories))).sort((a, b) => a.localeCompare(b, "ru"))];
   const filteredRecipes = state.recipes.filter((recipe) => {
     const text = `${recipe.title} ${recipe.categories.join(" ")} ${recipe.ingredients.map((item) => item.name).join(" ")}`.toLowerCase();
-    return (category === "все" || recipe.categories.includes(category)) && text.includes(query.toLowerCase());
+    const dish = recipe.linkedDishIds?.map((id) => dishMap.get(id)).find(Boolean);
+    const matchesQuick = quickFilter === "все"
+      || (quickFilter === "избранное" && recipe.favorite)
+      || (quickFilter === "детям" && dish?.kidsFriendly)
+      || (quickFilter === "быстро" && ((recipe.prepMinutes ?? 0) + (recipe.cookMinutes ?? 0) <= 35))
+      || (quickFilter === "черновики" && recipe.status === "draft");
+    return matchesQuick && (category === "все" || recipe.categories.includes(category)) && text.includes(query.toLowerCase());
   });
   const selected = state.recipes.find((recipe) => recipe.id === selectedId) ?? filteredRecipes[0] ?? state.recipes[0];
   const selectedDish = selected?.linkedDishIds?.map((id) => dishMap.get(id)).find(Boolean);
@@ -397,6 +395,32 @@ function DishesView({ state, setState, dishMap, onBan, onRecipeToMenu, onRecipeT
     setState({ ...state, recipes: [recipe, ...state.recipes] });
     setSelectedId(recipe.id);
     setEditing(true);
+  }
+
+  function createRecipeFromPhotoDraft() {
+    const parsed = parseRecipeDraftText(photoDraftText);
+    const recipe: RecipeEntry = {
+      id: `recipe-photo-${Date.now()}`,
+      title: parsed.title,
+      source: photoFileName ? `фото: ${photoFileName}` : "фото-рецепт",
+      categories: ["мои рецепты", "из фото"],
+      servings: 4,
+      prepMinutes: 10,
+      cookMinutes: 30,
+      rating: 3,
+      favorite: false,
+      likedBy: [],
+      dislikedBy: [],
+      notes: "Черновик из фото. В MVP текст вставляется вручную; позже сюда подключим OCR/AI распознавание.",
+      ingredients: parsed.ingredients,
+      steps: parsed.steps,
+      status: "draft",
+    };
+    setState({ ...state, recipes: [recipe, ...state.recipes] });
+    setSelectedId(recipe.id);
+    setEditing(true);
+    setPhotoDraftText("");
+    setPhotoFileName("");
   }
 
   function deleteRecipe(recipeId: string) {
@@ -430,11 +454,27 @@ function DishesView({ state, setState, dishMap, onBan, onRecipeToMenu, onRecipeT
             </div>
             <Button variant="soft" onClick={createRecipe}><Plus size={16} />Новый рецепт</Button>
           </div>
+          <div className="grid gap-3 rounded-2xl border border-[#ead7bd] bg-[#fffaf2] p-3 lg:grid-cols-[220px_1fr_auto] lg:items-center">
+            <label className="flex min-h-28 cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-[#d9a441] bg-white px-4 text-center text-sm font-bold text-[#6f4b16]">
+              <Camera size={24} />
+              <Upload size={16} />
+              {photoFileName || "Фото рецепта"}
+              <input className="sr-only" type="file" accept="image/*" onChange={(event) => setPhotoFileName(event.target.files?.[0]?.name ?? "")} />
+            </label>
+            <Textarea className="min-h-28" value={photoDraftText} onChange={(event) => setPhotoDraftText(event.target.value)} placeholder={"Вставьте распознанный текст или надиктовку рецепта.\nНапример:\nСырники\nИнгредиенты: творог 500 г, яйцо 1 шт, мука 3 ст.л.\nШаги: смешать, сформировать, обжарить."} />
+            <div className="flex flex-col gap-2">
+              <Button variant="soft" onClick={createRecipeFromPhotoDraft} disabled={!photoDraftText.trim()}><Sparkles size={16} />Создать черновик</Button>
+              <p className="max-w-48 text-xs text-muted-foreground">AI/OCR подключим позже: сейчас это безопасный черновик без отправки фото наружу.</p>
+            </div>
+          </div>
           <div className="grid gap-2 md:grid-cols-[1fr_180px]">
             <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Найти рецепт: сырники, курица, суп, салат" />
             <select className="min-h-11 rounded-xl border border-input bg-white px-4 text-sm font-semibold shadow-sm" value={category} onChange={(event) => setCategory(event.target.value)}>
               {categories.map((item) => <option key={item} value={item}>{item}</option>)}
             </select>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {["все", "избранное", "детям", "быстро", "черновики"].map((item) => <Button key={item} type="button" variant={quickFilter === item ? "soft" : "outline"} size="sm" onClick={() => setQuickFilter(item)}>{item}</Button>)}
           </div>
         </CardHeader>
       </Card>
@@ -471,7 +511,7 @@ function DishesView({ state, setState, dishMap, onBan, onRecipeToMenu, onRecipeT
 
     {selected && <Card className="xl:sticky xl:top-5 xl:self-start">
       <CardHeader className="space-y-3">
-        {selectedDish && <img src={photoForDish(selectedDish)} alt="" className="h-44 w-full rounded-2xl object-cover shadow-[0_12px_30px_rgba(129,83,43,0.12)]" />}
+        {selectedDish && <DishVisual dish={selectedDish} />}
         <div>
           <div className="flex items-start justify-between gap-3">
             <CardTitle>{selected.title}</CardTitle>
@@ -578,6 +618,60 @@ function textToIngredients(value: string): IngredientNeed[] {
     const safeCategory = knownCategories.includes(category as ShoppingCategory) ? category as ShoppingCategory : "бакалея";
     return { name, amount: Number(amount.replace(",", ".")) || 1, unit: unit || "шт", category: safeCategory };
   }).filter((item) => item.name);
+}
+
+function categoryForIngredient(name: string): ShoppingCategory {
+  const lower = name.toLowerCase();
+  if (["огур", "помид", "карто", "морков", "лук", "яблок", "банан", "зелень"].some((word) => lower.includes(word))) return "овощи и фрукты";
+  if (["кур", "фарш", "говяд", "свин", "мяс"].some((word) => lower.includes(word))) return "мясо и птица";
+  if (["рыб", "лосось", "хек"].some((word) => lower.includes(word))) return "рыба";
+  if (["молоко", "сыр", "творог", "сметан", "йогурт", "яйц"].some((word) => lower.includes(word))) return "молочные";
+  if (["хлеб", "батон", "лаваш"].some((word) => lower.includes(word))) return "хлеб";
+  if (["рис", "греч", "макарон", "пшено", "овсян"].some((word) => lower.includes(word))) return "крупы и макароны";
+  if (["ягод", "заморож"].some((word) => lower.includes(word))) return "заморозка";
+  if (["соль", "перец", "паприк", "укроп", "приправа"].some((word) => lower.includes(word))) return "специи";
+  if (["сахар", "мед", "варенье", "какао", "шоколад"].some((word) => lower.includes(word))) return "сладкое";
+  return "бакалея";
+}
+
+function ingredientFromPlainText(value: string): IngredientNeed {
+  const amountMatch = value.match(/(\d+(?:[,.]\d+)?)\s*(кг|г|л|мл|шт|ст\.?\s*л\.?|ч\.?\s*л\.?|пач|банка|банки)?/i);
+  const amount = amountMatch ? Number(amountMatch[1].replace(",", ".")) || 1 : 1;
+  const unit = amountMatch?.[2]?.replace(/\s+/g, " ") ?? "шт";
+  const name = value.replace(amountMatch?.[0] ?? "", "").replace(/^[-•\s,.:]+/, "").trim() || value.trim();
+  return { name, amount, unit, category: categoryForIngredient(name) };
+}
+
+function parseRecipeDraftText(value: string): Pick<RecipeEntry, "title" | "ingredients" | "steps"> {
+  const lines = value.split("\n").map((line) => line.trim()).filter(Boolean);
+  const title = lines[0]?.replace(/^название[:\s-]*/i, "") || "Рецепт из фото";
+  const ingredientLines: string[] = [];
+  const stepLines: string[] = [];
+  let mode: "ingredients" | "steps" | "none" = "none";
+
+  lines.slice(1).forEach((line) => {
+    const lower = line.toLowerCase();
+    if (lower.startsWith("ингредиент")) {
+      mode = "ingredients";
+      const rest = line.replace(/^ингредиенты?[:\s-]*/i, "");
+      if (rest) ingredientLines.push(...rest.split(/[,;]/).map((item) => item.trim()).filter(Boolean));
+      return;
+    }
+    if (lower.startsWith("шаг") || lower.startsWith("приготов")) {
+      mode = "steps";
+      const rest = line.replace(/^(шаги|приготовление)[:\s-]*/i, "");
+      if (rest) stepLines.push(...rest.split(/;\s*/).map((item) => item.trim()).filter(Boolean));
+      return;
+    }
+    if (mode === "ingredients") ingredientLines.push(...line.split(/[,;]/).map((item) => item.trim()).filter(Boolean));
+    else if (mode === "steps") stepLines.push(line.replace(/^\d+[).]\s*/, ""));
+  });
+
+  return {
+    title,
+    ingredients: ingredientLines.length ? ingredientLines.map(ingredientFromPlainText) : [{ name: "продукт", amount: 1, unit: "шт", category: "бакалея" }],
+    steps: stepLines.length ? stepLines : ["Проверить текст с фото", "Уточнить ингредиенты", "Описать приготовление"],
+  };
 }
 
 function FamilyView({ state, setState, onRebuild }: { state: AppState; setState: (state: AppState) => void; onRebuild: () => void }) {
@@ -772,7 +866,7 @@ function ReplaceDialog({ state, request, onClose, onPick, onAuto }: { state: App
       <CardContent className="max-h-[68vh] overflow-y-auto pt-5">
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {options.map((dish) => <button key={dish.id} onClick={() => onPick(dish.id)} className="rounded-2xl border border-[#ead7bd] bg-[#fffaf2] p-3 text-left transition hover:-translate-y-0.5 hover:border-[#f47b58] hover:shadow-[0_14px_28px_rgba(129,83,43,0.13)]">
-            <img src={photoForDish(dish)} alt="" className="mb-3 h-28 w-full rounded-xl object-cover" />
+            <DishVisual dish={dish} />
             <p className="font-black">{dish.name}</p>
             <p className="text-sm text-muted-foreground">{dish.effort === "easy" ? "быстро" : dish.effort === "weekend" ? "на выходные" : "обычно"} · {dish.kidsFriendly ? "детям ок" : "скорее взрослым"}</p>
           </button>)}
