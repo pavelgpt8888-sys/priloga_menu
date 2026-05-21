@@ -41,6 +41,37 @@ function textHas(dish: DishComponent, words: string[]) {
   return words.some((word) => text.includes(word.toLowerCase()));
 }
 
+function memberWords(words?: string[]) {
+  return (words ?? []).map((word) => word.trim().toLowerCase()).filter(Boolean);
+}
+
+function preferenceScore(state: AppState, dish: DishComponent) {
+  let score = 0;
+  state.family.forEach((member) => {
+    const dislikes = memberWords(member.dislikes);
+    const restrictions = memberWords(member.restrictions);
+    const likes = memberWords(member.likes);
+    const favorites = memberWords(member.favoriteDishes);
+    const childWeight = member.role === "child" ? 2 : member.role === "teen" ? 1.5 : 1;
+
+    if (textHas(dish, restrictions)) score -= 12 * childWeight;
+    if (textHas(dish, dislikes)) score -= 5 * childWeight;
+    if (textHas(dish, likes)) score += 2;
+    if (favorites.some((favorite) => dish.name.toLowerCase().includes(favorite))) score += 5;
+  });
+  return score;
+}
+
+function personalizedPool(pool: DishComponent[], state: AppState) {
+  const scored = pool.map((dish) => ({ dish, score: preferenceScore(state, dish) })).sort((a, b) => b.score - a.score || a.dish.name.localeCompare(b.dish.name, "ru"));
+  const acceptable = scored.filter((entry) => entry.score > -8).map((entry) => entry.dish);
+  return acceptable.length ? acceptable : scored.map((entry) => entry.dish);
+}
+
+function pickPersonalized(pool: DishComponent[], seed: number, used: Set<string>, state: AppState, fallbackPool = pool) {
+  return pick(personalizedPool(pool, state), seed, used, personalizedPool(fallbackPool, state));
+}
+
 function breakfastAddonPool(base: DishComponent, addons: DishComponent[]) {
   if (textHas(base, ["каша", "овсян", "греч", "рисов", "пшен"])) {
     return addons.filter((dish) => textHas(dish, ["яблок", "банан", "орех", "мед", "огур", "помид"]));
@@ -83,10 +114,10 @@ export function generateWeek(state: AppState, mode: "balanced" | "simple" | "che
     const kidsVegPool = role(state.dishes, "kids_vegetables", state.bannedDishIds);
     const soupPool = role(state.dishes, "soup", state.bannedDishIds);
 
-    const base = pick(breakfastBasePool, index + 1, used);
+    const base = pickPersonalized(breakfastBasePool, index + 1, used, state);
     const addonChoices = breakfastAddonPool(base, addonPool);
-    const addon = pick(addonChoices.length ? addonChoices : addonPool.filter((dish) => !dish.sweetPastry), index + 4, used, addonPool);
-    const drink = pick(breakfastDrinkPool(base, addonPool), index + 9, used, addonPool);
+    const addon = pickPersonalized(addonChoices.length ? addonChoices : addonPool.filter((dish) => !dish.sweetPastry), index + 4, used, state, addonPool);
+    const drink = pickPersonalized(breakfastDrinkPool(base, addonPool), index + 9, used, state, addonPool);
     used.add(base.id); used.add(addon.id);
 
     meals.push({
@@ -96,15 +127,15 @@ export function generateWeek(state: AppState, mode: "balanced" | "simple" | "che
     });
 
     if (index % 2 === 0) {
-      const soup = pick(soupPool, index + 2, used);
+      const soup = pickPersonalized(soupPool, index + 2, used, state);
       used.add(soup.id);
       meals.push({ id: `${date}-lunch`, date, kind: "lunch", title: "Обед", source: "generated", components: [{ slot: "soup", dishId: soup.id }], notes: "Простой семейный обед." });
     }
 
-    const main = pick(mainPool.length ? mainPool : role(state.dishes, "main", state.bannedDishIds), index + 12, used);
-    const side = pick(sidePool, index + 20, used);
-    const salad = pick(saladPool, index + 30, used);
-    const kidsVeg = pick(kidsVegPool, index + 40, used);
+    const main = pickPersonalized(mainPool.length ? mainPool : role(state.dishes, "main", state.bannedDishIds), index + 12, used, state);
+    const side = pickPersonalized(sidePool, index + 20, used, state);
+    const salad = pickPersonalized(saladPool, index + 30, used, state);
+    const kidsVeg = pickPersonalized(kidsVegPool, index + 40, used, state);
     [main, side, salad, kidsVeg].forEach((dish) => used.add(dish.id));
     meals.push({
       id: `${date}-dinner`, date, kind: "dinner", title: "Ужин", source: "generated",
@@ -126,7 +157,7 @@ export function replaceComponent(state: AppState, mealId: string, slot: MealComp
     const current = meal.components.find((component) => component.slot === slot);
     const roleToUse = prefer ?? (current ? dishMap.get(current.dishId)?.role : undefined);
     if (!roleToUse) return meal;
-    const candidates = role(state.dishes, roleToUse, state.bannedDishIds).filter((dish) => dish.id !== current?.dishId);
+    const candidates = personalizedPool(role(state.dishes, roleToUse, state.bannedDishIds), state).filter((dish) => dish.id !== current?.dishId);
     const next = candidates[0] ?? state.dishes.find((dish) => dish.role === roleToUse);
     if (!next) return meal;
     return { ...meal, components: meal.components.map((component) => component.slot === slot ? { ...component, dishId: next.id } : component) };
@@ -140,7 +171,7 @@ export function replacementOptions(state: AppState, mealId: string, slot: MealCo
   const currentDish = current ? state.dishes.find((dish) => dish.id === current.dishId) : undefined;
   const roleToUse = currentDish?.role;
   if (!roleToUse) return [];
-  let candidates = role(state.dishes, roleToUse, state.bannedDishIds).filter((dish) => dish.id !== currentDish.id);
+  let candidates = personalizedPool(role(state.dishes, roleToUse, state.bannedDishIds), state).filter((dish) => dish.id !== currentDish.id);
   if (meal?.kind === "breakfast" && slot === "addon") {
     const baseId = meal.components.find((component) => component.slot === "base")?.dishId;
     const base = state.dishes.find((dish) => dish.id === baseId);
