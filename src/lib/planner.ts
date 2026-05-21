@@ -299,6 +299,16 @@ export function planRecipeForMeal(state: AppState, recipe: RecipeEntry, date: st
   return { ...prepared.state, meals, shopping: buildShoppingList({ ...prepared.state, meals }) };
 }
 
+export function moveMealToDate(state: AppState, mealId: string, date: string): AppState {
+  const mealToMove = state.meals.find((meal) => meal.id === mealId);
+  if (!mealToMove) return state;
+  const movedId = `${date}-${mealToMove.kind}-moved-${Date.now()}`;
+  const meals = state.meals
+    .filter((meal) => meal.id === mealId || !(meal.date === date && meal.kind === mealToMove.kind))
+    .map((meal) => meal.id === mealId ? { ...meal, id: movedId, date, source: "manual" as const, notes: `${mealLabel(meal.kind)} перенесен вручную.` } : meal);
+  return { ...state, meals, shopping: buildShoppingList({ ...state, meals }) };
+}
+
 export function addRecipeToNextMenu(state: AppState, recipe: RecipeEntry): AppState {
   const dishId = recipe.linkedDishIds?.find((id) => state.dishes.some((dish) => dish.id === id));
   if (!dishId) return state;
