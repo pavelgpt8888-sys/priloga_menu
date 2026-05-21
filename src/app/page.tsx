@@ -7,8 +7,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { initialState } from "@/lib/demo-data";
-import { addManualShoppingItem, addRecipeToNextMenu, addRecipeToShopping, applyQuickScenario, banDish, buildShoppingList, byId, generateWeek, mealLabel, parseCommand, removeComponent, replaceComponent, replacementOptions, replaceComponentWithDish, startOfToday } from "@/lib/planner";
-import type { AppState, CookingSession, DishComponent, FamilyMember, IngredientNeed, MealComponent, MealPlan, RecipeEntry, ShoppingCategory, ShoppingItem } from "@/lib/types";
+import { addManualShoppingItem, addRecipeToNextMenu, addRecipeToShopping, applyQuickScenario, banDish, buildShoppingList, byId, generateWeek, mealLabel, parseCommand, planRecipeForMeal, removeComponent, replaceComponent, replacementOptions, replaceComponentWithDish, startOfToday } from "@/lib/planner";
+import type { AppState, CookingSession, DishComponent, FamilyMember, IngredientNeed, MealComponent, MealKind, MealPlan, RecipeEntry, ShoppingCategory, ShoppingItem } from "@/lib/types";
 
 const storageKey = "family-meal-planner-state-v1";
 const sections = [
@@ -183,7 +183,12 @@ export default function HomePage() {
           {toast && <div className="flex flex-col gap-3 rounded-2xl border border-[#b9d6b8] bg-[#edf7ed] p-4 text-sm font-semibold text-[#285f3b] shadow-[0_12px_30px_rgba(63,125,82,0.10)] sm:flex-row sm:items-center sm:justify-between"><span>{toast}</span>{undo && <Button variant="outline" size="sm" onClick={() => { setState(undo); setUndo(null); setToast("Отменено. Вернули предыдущее состояние."); }}><RotateCcw size={16} />Отменить</Button>}</div>}
 
           {active === "Сегодня" && <TodayView meals={todayMeals} shopping={state.shopping} dishMap={dishMap} onOpenShopping={() => setActive("Покупки")} onReplace={(meal, slot) => setReplaceRequest({ meal, slot })} onRemove={(meal, slot) => commit(removeComponent(state, meal.id, slot), `Убрали ${slotLabels[slot]}.`)} onMove={moveMeal} onRepeat={repeatMeal} onShop={addMealToShopping} onBan={(dish) => commit(banDish(state, dish.id), `${dish.name}: пока не предлагаем.`)} onCook={startCooking} onQuick={handleQuick} />}
-          {active === "Меню" && <MenuView meals={state.meals} dishMap={dishMap} regenerate={regenerate} onReplace={(meal, slot) => setReplaceRequest({ meal, slot })} />}
+          {active === "Меню" && <MenuView state={state} dishMap={dishMap} regenerate={regenerate} onReplace={(meal, slot) => setReplaceRequest({ meal, slot })} onPlanTomorrow={(recipe, kind) => {
+            const date = new Date(startOfToday());
+            date.setDate(date.getDate() + 1);
+            const planned = planRecipeForMeal(state, recipe, date.toISOString().slice(0, 10), kind);
+            commit(planned, `${mealLabel(kind)} на завтра обновлен: ${recipe.title}.`);
+          }} onOpenShopping={() => setActive("Покупки")} />}
           {active === "Блюда" && <DishesView state={state} setState={setState} dishMap={dishMap} onBan={(dish) => commit(banDish(state, dish.id), `${dish.name}: скрыто из предложений.`)} onRecipeToMenu={(recipe) => commit(addRecipeToNextMenu(state, recipe), `${recipe.title}: добавлено в меню на завтра.`)} onRecipeToShopping={(recipe) => commit(addRecipeToShopping(state, recipe), `${recipe.title}: ингредиенты добавлены в покупки.`)} />}
           {active === "Семья" && <FamilyView state={state} setState={setState} />}
           {active === "Кухня" && <KitchenView state={state} dishMap={dishMap} commit={commit} />}
@@ -242,9 +247,60 @@ function MealCard({ meal, dishMap, onReplace, onRemove, onMove, onRepeat, onShop
   </Card>;
 }
 
-function MenuView({ meals, dishMap, regenerate, onReplace }: { meals: MealPlan[]; dishMap: Map<string, DishComponent>; regenerate: (mode?: Parameters<typeof generateWeek>[1]) => void; onReplace: (meal: MealPlan, slot: MealComponent["slot"]) => void; }) {
-  const grouped = Object.groupBy(meals, (meal) => meal.date);
-  return <div className="space-y-4"><div className="flex flex-wrap gap-2"><Button onClick={() => regenerate("balanced")}>Сгенерировать неделю</Button><Button variant="soft" onClick={() => regenerate("simple")}>Будни проще</Button><Button variant="soft" onClick={() => regenerate("leftovers")}>Использовать остатки</Button><Button variant="soft" onClick={() => regenerate("freezer")}>Взять из морозилки</Button></div><div className="grid gap-4 xl:grid-cols-2">{Object.entries(grouped).map(([date, dayMeals]) => <Card key={date}><CardHeader><CardTitle>{new Date(date).toLocaleDateString("ru-RU", { weekday: "long", day: "numeric", month: "long" })}</CardTitle></CardHeader><CardContent className="space-y-3">{dayMeals?.map((meal) => <div key={meal.id} className="rounded-2xl bg-white p-4"><p className="font-black">{mealLabel(meal.kind)}</p>{meal.components.map((component) => <button key={component.slot} onClick={() => onReplace(meal, component.slot)} className="mt-2 block w-full rounded-xl border border-border px-3 py-2 text-left text-sm hover:bg-[#FFF3D6]"><b>{slotLabels[component.slot]}:</b> {dishMap.get(component.dishId)?.name}</button>)}</div>)}</CardContent></Card>)}</div></div>;
+function MenuView({ state, dishMap, regenerate, onReplace, onPlanTomorrow, onOpenShopping }: { state: AppState; dishMap: Map<string, DishComponent>; regenerate: (mode?: Parameters<typeof generateWeek>[1]) => void; onReplace: (meal: MealPlan, slot: MealComponent["slot"]) => void; onPlanTomorrow: (recipe: RecipeEntry, kind: MealKind) => void; onOpenShopping: () => void; }) {
+  const [breakfastId, setBreakfastId] = useState(state.recipes.find((recipe) => recipe.categories.includes("завтраки"))?.id ?? state.recipes[0]?.id ?? "");
+  const [dinnerId, setDinnerId] = useState(state.recipes.find((recipe) => recipe.categories.includes("ужины"))?.id ?? state.recipes[0]?.id ?? "");
+  const grouped = Object.groupBy(state.meals, (meal) => meal.date);
+  const tomorrow = new Date(startOfToday());
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const tomorrowIso = tomorrow.toISOString().slice(0, 10);
+  const tomorrowMeals = state.meals.filter((meal) => meal.date === tomorrowIso);
+  const breakfastRecipes = state.recipes.filter((recipe) => recipe.categories.includes("завтраки") || recipe.title.toLowerCase().includes("сырник") || recipe.title.toLowerCase().includes("каша"));
+  const dinnerRecipes = state.recipes.filter((recipe) => recipe.categories.includes("ужины") || recipe.categories.includes("супы") || recipe.categories.includes("мои рецепты"));
+  const selectedBreakfast = state.recipes.find((recipe) => recipe.id === breakfastId) ?? breakfastRecipes[0] ?? state.recipes[0];
+  const selectedDinner = state.recipes.find((recipe) => recipe.id === dinnerId) ?? dinnerRecipes[0] ?? state.recipes[0];
+
+  return <div className="space-y-4">
+    <Card className="border-[#e2bf6b] bg-gradient-to-br from-[#fffaf0] to-[#edf7ed]">
+      <CardHeader className="space-y-3">
+        <div>
+          <CardTitle>Мой реальный день: завтра</CardTitle>
+          <p className="text-sm text-muted-foreground">Быстро выберите завтрак и ужин из рецептов, а потом откройте общий список покупок.</p>
+        </div>
+        <div className="grid gap-3 xl:grid-cols-[1fr_1fr_auto]">
+          <label className="grid gap-1 text-sm font-semibold">Завтрак
+            <select className="min-h-12 rounded-xl border border-input bg-white px-4 text-sm shadow-sm" value={selectedBreakfast?.id ?? ""} onChange={(event) => setBreakfastId(event.target.value)}>
+              {breakfastRecipes.map((recipe) => <option key={recipe.id} value={recipe.id}>{recipe.title}</option>)}
+            </select>
+          </label>
+          <label className="grid gap-1 text-sm font-semibold">Ужин
+            <select className="min-h-12 rounded-xl border border-input bg-white px-4 text-sm shadow-sm" value={selectedDinner?.id ?? ""} onChange={(event) => setDinnerId(event.target.value)}>
+              {dinnerRecipes.map((recipe) => <option key={recipe.id} value={recipe.id}>{recipe.title}</option>)}
+            </select>
+          </label>
+          <div className="flex flex-col justify-end gap-2 sm:flex-row xl:flex-col">
+            <Button onClick={() => selectedBreakfast && onPlanTomorrow(selectedBreakfast, "breakfast")}>Поставить завтрак</Button>
+            <Button variant="soft" onClick={() => selectedDinner && onPlanTomorrow(selectedDinner, "dinner")}>Поставить ужин</Button>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="grid gap-3 md:grid-cols-2">
+          {tomorrowMeals.length ? tomorrowMeals.map((meal) => <div key={meal.id} className="rounded-2xl bg-white/85 p-3">
+            <p className="font-black">{mealLabel(meal.kind)}</p>
+            <p className="mt-1 text-sm text-muted-foreground">{meal.components.map((component) => dishMap.get(component.dishId)?.name).filter(Boolean).join(", ")}</p>
+          </div>) : <p className="rounded-2xl bg-white/85 p-3 text-sm text-muted-foreground">На завтра пока ничего не выбрано отдельно. Можно поставить завтрак или ужин выше.</p>}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={onOpenShopping}><ShoppingBasket size={16} />Открыть общий список покупок</Button>
+          <Button variant="ghost" onClick={() => regenerate("balanced")}>Пересобрать неделю</Button>
+        </div>
+      </CardContent>
+    </Card>
+
+    <div className="flex flex-wrap gap-2"><Button onClick={() => regenerate("balanced")}>Сгенерировать неделю</Button><Button variant="soft" onClick={() => regenerate("simple")}>Будни проще</Button><Button variant="soft" onClick={() => regenerate("leftovers")}>Использовать остатки</Button><Button variant="soft" onClick={() => regenerate("freezer")}>Взять из морозилки</Button></div>
+    <div className="grid gap-4 xl:grid-cols-2">{Object.entries(grouped).map(([date, dayMeals]) => <Card key={date}><CardHeader><CardTitle>{new Date(date).toLocaleDateString("ru-RU", { weekday: "long", day: "numeric", month: "long" })}</CardTitle></CardHeader><CardContent className="space-y-3">{dayMeals?.map((meal) => <div key={meal.id} className="rounded-2xl bg-white p-4"><p className="font-black">{mealLabel(meal.kind)}</p>{meal.components.map((component) => <button key={component.slot} onClick={() => onReplace(meal, component.slot)} className="mt-2 block w-full rounded-xl border border-border px-3 py-2 text-left text-sm hover:bg-[#FFF3D6]"><b>{slotLabels[component.slot]}:</b> {dishMap.get(component.dishId)?.name}</button>)}</div>)}</CardContent></Card>)}</div>
+  </div>;
 }
 
 function DishesView({ state, setState, dishMap, onBan, onRecipeToMenu, onRecipeToShopping }: { state: AppState; setState: (state: AppState) => void; dishMap: Map<string, DishComponent>; onBan: (dish: DishComponent) => void; onRecipeToMenu: (recipe: RecipeEntry) => void; onRecipeToShopping: (recipe: RecipeEntry) => void }) {

@@ -236,6 +236,69 @@ function slotForDishRole(roleToUse: DishRole): MealComponent["slot"] {
   return "main";
 }
 
+function slotForMealKind(kind: MealKind, roleToUse: DishRole): MealComponent["slot"] {
+  if (kind === "breakfast") return roleToUse === "breakfast_addon" ? "addon" : "base";
+  if (kind === "lunch") return roleToUse === "soup" ? "soup" : "main";
+  return slotForDishRole(roleToUse);
+}
+
+function dishRoleForMealKind(kind: MealKind): DishRole {
+  if (kind === "breakfast") return "breakfast_base";
+  if (kind === "lunch") return "soup";
+  return "main";
+}
+
+function ensureDishForRecipe(state: AppState, recipe: RecipeEntry, kind: MealKind): { state: AppState; dish: DishComponent; recipe: RecipeEntry } {
+  const linkedDish = recipe.linkedDishIds?.map((id) => state.dishes.find((dish) => dish.id === id)).find(Boolean);
+  if (linkedDish) return { state, dish: linkedDish, recipe };
+
+  const dish: DishComponent = {
+    id: `dish-${recipe.id}`,
+    name: recipe.title,
+    role: dishRoleForMealKind(kind),
+    effort: (recipe.prepMinutes ?? 0) + (recipe.cookMinutes ?? 0) > 50 ? "weekend" : "medium",
+    cost: "medium",
+    kidsFriendly: true,
+    ingredients: recipe.ingredients,
+    steps: recipe.steps,
+  };
+  const updatedRecipe = { ...recipe, linkedDishIds: [dish.id], status: "ready" as const };
+  const recipes = state.recipes.map((item) => item.id === recipe.id ? updatedRecipe : item);
+  return { state: { ...state, dishes: [...state.dishes, dish], recipes }, dish, recipe: updatedRecipe };
+}
+
+export function planRecipeForMeal(state: AppState, recipe: RecipeEntry, date: string, kind: MealKind): AppState {
+  const prepared = ensureDishForRecipe(state, recipe, kind);
+  const dish = prepared.dish;
+  const slot = slotForMealKind(kind, dish.role);
+  const mealTitle = mealLabel(kind);
+  const existing = prepared.state.meals.find((meal) => meal.date === date && meal.kind === kind);
+  let meals: MealPlan[];
+
+  if (existing) {
+    meals = prepared.state.meals.map((meal) => {
+      if (meal.id !== existing.id) return meal;
+      const hasSlot = meal.components.some((component) => component.slot === slot);
+      const components = hasSlot
+        ? meal.components.map((component) => component.slot === slot ? { ...component, dishId: dish.id } : component)
+        : [{ slot, dishId: dish.id }, ...meal.components];
+      return { ...meal, title: mealTitle, source: "manual", notes: `${mealTitle} обновлен из рецептов.`, components };
+    });
+  } else {
+    meals = [...prepared.state.meals, {
+      id: `${date}-${kind}-manual-${Date.now()}`,
+      date,
+      kind,
+      title: mealTitle,
+      source: "manual",
+      notes: `${mealTitle} добавлен из рецептов.`,
+      components: [{ slot, dishId: dish.id }],
+    }];
+  }
+
+  return { ...prepared.state, meals, shopping: buildShoppingList({ ...prepared.state, meals }) };
+}
+
 export function addRecipeToNextMenu(state: AppState, recipe: RecipeEntry): AppState {
   const dishId = recipe.linkedDishIds?.find((id) => state.dishes.some((dish) => dish.id === id));
   if (!dishId) return state;
