@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { initialState } from "@/lib/demo-data";
 import { addManualShoppingItem, addRecipeToNextMenu, addRecipeToShopping, applyQuickScenario, banDish, buildShoppingList, byId, generateWeek, mealLabel, moveCheckedShoppingToInventory, moveMealToDate, parseCommand, planRecipeForMeal, removeComponent, replaceComponent, replacementOptions, replaceComponentWithDish, startOfToday } from "@/lib/planner";
-import type { AppState, CookingSession, DishComponent, FamilyMember, IngredientNeed, MealComponent, MealKind, MealPlan, RecipeEntry, ShoppingCategory, ShoppingItem } from "@/lib/types";
+import type { AppState, CookingSession, DishComponent, FamilyMember, IngredientNeed, InventoryItem, MealComponent, MealKind, MealPlan, RecipeEntry, ShoppingCategory, ShoppingItem, StoragePlace } from "@/lib/types";
 
 const storageKey = "family-meal-planner-state-v1";
 const sections = [
@@ -192,7 +192,7 @@ export default function HomePage() {
           {active === "Кухня" && <KitchenView state={state} dishMap={dishMap} commit={commit} />}
           {active === "Остатки" && <LeftoversView state={state} />}
           {active === "Морозилка" && <FreezerView state={state} />}
-          {active === "Запасы" && <InventoryView state={state} />}
+          {active === "Запасы" && <InventoryView state={state} setState={setState} commit={commit} />}
           {active === "Покупки" && <ShoppingView state={state} setState={setState} commit={commit} manualProduct={manualProduct} setManualProduct={setManualProduct} />}
           {active === "Настройки" && <SettingsView state={state} reset={() => commit(seededState(), "Демо-данные восстановлены.")} />}
         </section>
@@ -667,7 +667,62 @@ function KitchenView({ state, dishMap, commit }: { state: AppState; dishMap: Map
 
 function LeftoversView({ state }: { state: AppState }) { return <div className="grid gap-4 md:grid-cols-2">{state.leftovers.map((item) => <Card key={item.id}><CardHeader><CardTitle>{item.name}</CardTitle></CardHeader><CardContent><p>{item.amount}</p><p className="text-sm text-muted-foreground">Готовили {item.cookedAt}, использовать до {item.useBy}</p><p className="mt-3 rounded-xl bg-[#FFF3D6] p-3 text-sm">Во что превратить: {item.transformInto.join(", ")}</p></CardContent></Card>)}</div>; }
 function FreezerView({ state }: { state: AppState }) { return <div className="grid gap-4 md:grid-cols-2">{state.freezer.map((item) => <Card key={item.id}><CardHeader><CardTitle>{item.name}</CardTitle></CardHeader><CardContent><p>{item.amount}</p><p className="text-sm text-muted-foreground">Заморожено {item.frozenAt}, использовать до {item.useBy}</p><p className="mt-3 rounded-xl bg-[#EAF4EC] p-3 text-sm">Подать с: {item.serveWith.join(", ")}</p></CardContent></Card>)}</div>; }
-function InventoryView({ state }: { state: AppState }) { return <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{state.inventory.map((item) => <Card key={item.id}><CardHeader><CardTitle>{item.product}</CardTitle></CardHeader><CardContent><p>{item.amount} {item.unit}</p><p className="text-sm text-muted-foreground">{item.category} · {item.place === "fridge" ? "холодильник" : item.place === "freezer" ? "морозилка" : "шкаф"}</p>{item.urgent && <p className="mt-3 rounded-xl bg-[#FFF3D6] p-3 text-sm font-semibold">Использовать срочно</p>}</CardContent></Card>)}</div>; }
+function InventoryView({ state, setState, commit }: { state: AppState; setState: (state: AppState) => void; commit: (next: AppState, message: string) => void }) {
+  const [product, setProduct] = useState("");
+  const [amount, setAmount] = useState("1");
+  const [unit, setUnit] = useState("шт");
+  const [category, setCategory] = useState<ShoppingCategory>("бакалея");
+  const [place, setPlace] = useState<StoragePlace>("fridge");
+  const placeLabel: Record<StoragePlace, string> = { fridge: "холодильник", freezer: "морозилка", pantry: "шкаф" };
+  const update = (item: InventoryItem, patch: Partial<InventoryItem>) => setState({ ...state, inventory: state.inventory.map((entry) => entry.id === item.id ? { ...entry, ...patch } : entry) });
+  const addInventory = (event: FormEvent) => {
+    event.preventDefault();
+    const cleanProduct = product.trim();
+    if (!cleanProduct) return;
+    const numericAmount = Math.max(0.1, Number(amount.replace(",", ".")) || 1);
+    const nextItem: InventoryItem = { id: `inv-manual-${Date.now()}`, product: cleanProduct, amount: numericAmount, unit: unit.trim() || "шт", category, place, source: "manual" };
+    commit({ ...state, inventory: [nextItem, ...state.inventory] }, `${cleanProduct}: добавили в запасы.`);
+    setProduct("");
+    setAmount("1");
+  };
+
+  return <div className="space-y-4">
+    <Card>
+      <CardHeader><CardTitle>Холодильник и запасы</CardTitle></CardHeader>
+      <CardContent>
+        <form className="grid gap-2 md:grid-cols-[minmax(180px,1fr)_90px_90px_160px_150px_auto]" onSubmit={addInventory}>
+          <Input value={product} onChange={(event) => setProduct(event.target.value)} placeholder="Продукт: молоко, яйца, рис" />
+          <Input value={amount} onChange={(event) => setAmount(event.target.value)} inputMode="decimal" placeholder="Кол-во" />
+          <Input value={unit} onChange={(event) => setUnit(event.target.value)} placeholder="ед." />
+          <select className="min-h-11 rounded-xl border border-input bg-white px-3 text-sm font-semibold shadow-sm" value={category} onChange={(event) => setCategory(event.target.value as ShoppingCategory)}>
+            {knownCategories.map((item) => <option key={item} value={item}>{item}</option>)}
+          </select>
+          <select className="min-h-11 rounded-xl border border-input bg-white px-3 text-sm font-semibold shadow-sm" value={place} onChange={(event) => setPlace(event.target.value as StoragePlace)}>
+            {Object.entries(placeLabel).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+          </select>
+          <Button type="submit">Добавить</Button>
+        </form>
+      </CardContent>
+    </Card>
+
+    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+      {state.inventory.map((item) => <Card key={item.id}>
+        <CardHeader><CardTitle>{item.product}</CardTitle></CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-lg font-black">{item.amount} {item.unit}</p>
+          <p className="text-sm text-muted-foreground">{item.category} · {placeLabel[item.place]}</p>
+          {item.urgent && <p className="rounded-xl bg-[#FFF3D6] p-3 text-sm font-semibold">Использовать срочно</p>}
+          <div className="flex flex-wrap gap-2">
+            <Button variant="ghost" size="sm" onClick={() => update(item, { amount: Math.max(0.1, Number((item.amount - 1).toFixed(1))) })}>Меньше</Button>
+            <Button variant="ghost" size="sm" onClick={() => update(item, { amount: Number((item.amount + 1).toFixed(1)) })}>Больше</Button>
+            <Button variant="outline" size="sm" onClick={() => update(item, { urgent: !item.urgent })}>{item.urgent ? "Не срочно" : "Срочно"}</Button>
+            <Button variant="danger" size="sm" onClick={() => setState({ ...state, inventory: state.inventory.filter((entry) => entry.id !== item.id) })}>Удалить</Button>
+          </div>
+        </CardContent>
+      </Card>)}
+    </div>
+  </div>;
+}
 
 function ShoppingView({ state, setState, commit, manualProduct, setManualProduct }: { state: AppState; setState: (state: AppState) => void; commit: (next: AppState, message: string) => void; manualProduct: string; setManualProduct: (value: string) => void }) {
   const grouped = Object.groupBy(state.shopping, (item) => item.category);
