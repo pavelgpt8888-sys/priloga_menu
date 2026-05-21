@@ -1,4 +1,4 @@
-import type { AppState, DishComponent, DishRole, FamilyMember, FreezerItem, IngredientNeed, InventoryItem, Leftover, ShoppingCategory } from "./types";
+import type { AppState, DishComponent, DishRole, FamilyMember, FreezerItem, IngredientNeed, InventoryItem, Leftover, RecipeEntry, ShoppingCategory } from "./types";
 
 const cat = (name: string): ShoppingCategory => name as ShoppingCategory;
 const ing = (name: string, amount: number, unit = "шт", category = "бакалея"): IngredientNeed => ({ name, amount, unit, category: cat(category) });
@@ -126,6 +126,54 @@ export const dishes: DishComponent[] = [
   d("Творожные булочки", "snack", [ing("творог", 500, "г", "молочные"), ing("мука", 1, "кг", "бакалея")]),
 ];
 
+const roleCategory: Record<DishRole, string> = {
+  breakfast_base: "завтраки",
+  breakfast_addon: "добавки",
+  main: "ужины",
+  side: "гарниры",
+  salad: "салаты",
+  kids_vegetables: "детям",
+  soup: "супы",
+  dessert: "десерты",
+  snack: "перекусы",
+  leftover_based: "остатки",
+  freezer_item: "морозилка",
+};
+
+const recipeFromDish = (dish: DishComponent, index: number): RecipeEntry => {
+  const text = `${dish.name} ${dish.ingredients.map((item) => item.name).join(" ")}`.toLowerCase();
+  const likedBy = family
+    .filter((member) => member.favoriteDishes?.includes(dish.name) || member.likes?.some((like) => text.includes(like.toLowerCase())))
+    .map((member) => member.id);
+  const dislikedBy = family
+    .filter((member) => member.dislikes?.some((dislike) => text.includes(dislike.toLowerCase())))
+    .map((member) => member.id);
+
+  return {
+    id: `recipe-${dish.id}`,
+    title: dish.name,
+    source: "семейная база",
+    categories: [roleCategory[dish.role], dish.effort === "easy" ? "будни" : dish.effort === "weekend" ? "выходные" : "обычно"],
+    servings: 4,
+    prepMinutes: dish.effort === "easy" ? 10 : 20,
+    cookMinutes: dish.effort === "weekend" ? 60 : dish.effort === "medium" ? 40 : 25,
+    rating: likedBy.length >= 2 ? 5 : likedBy.length ? 4 : 3,
+    favorite: index < 6 || likedBy.length > 0,
+    likedBy,
+    dislikedBy,
+    notes: dish.kidsFriendly ? "Подходит для семейного меню." : "Лучше предлагать взрослым или заменить детям простыми овощами.",
+    ingredients: dish.ingredients,
+    steps: dish.steps ?? ["Подготовить продукты", "Приготовить без спешки", "Подать семье и записать остатки"],
+    linkedDishIds: [dish.id],
+    status: "ready",
+  };
+};
+
+export const recipes: RecipeEntry[] = dishes
+  .filter((dish) => ["breakfast_base", "main", "soup", "salad", "dessert"].includes(dish.role))
+  .slice(0, 30)
+  .map(recipeFromDish);
+
 export const inventory: InventoryItem[] = [
   { id: "inv-potato", product: "картофель", amount: 2, unit: "кг", category: cat("овощи и фрукты"), place: "pantry", source: "manual" },
   { id: "inv-eggs", product: "яйца", amount: 10, unit: "шт", category: cat("молочные"), place: "fridge", expiresAt: "2026-05-24", urgent: true, source: "manual" },
@@ -145,5 +193,5 @@ export const freezer: FreezerItem[] = [
 ];
 
 export const initialState: AppState = {
-  family, dishes, inventory, leftovers, freezer, meals: [], shopping: [], recipes: [{ id: "draft-1", url: "", title: "", ingredients: "", steps: "", status: "draft" }], bannedDishIds: [],
+  family, dishes, inventory, leftovers, freezer, meals: [], shopping: [], recipes, bannedDishIds: [],
 };

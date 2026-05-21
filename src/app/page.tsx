@@ -1,14 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { CalendarDays, ChefHat, Home, IceCreamBowl, ListChecks, RotateCcw, Settings, ShoppingBasket, Snowflake, Soup, Users, Warehouse } from "lucide-react";
+import { CalendarDays, ChefHat, Heart, Home, IceCreamBowl, ListChecks, Plus, RotateCcw, Settings, ShoppingBasket, Snowflake, Soup, Star, Users, Warehouse } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { initialState } from "@/lib/demo-data";
-import { addManualShoppingItem, applyQuickScenario, banDish, buildShoppingList, byId, generateWeek, mealLabel, parseCommand, removeComponent, replaceComponent, replacementOptions, replaceComponentWithDish, startOfToday } from "@/lib/planner";
-import type { AppState, CookingSession, DishComponent, FamilyMember, MealComponent, MealPlan, ShoppingItem } from "@/lib/types";
+import { addManualShoppingItem, addRecipeToNextMenu, addRecipeToShopping, applyQuickScenario, banDish, buildShoppingList, byId, generateWeek, mealLabel, parseCommand, removeComponent, replaceComponent, replacementOptions, replaceComponentWithDish, startOfToday } from "@/lib/planner";
+import type { AppState, CookingSession, DishComponent, FamilyMember, MealComponent, MealPlan, RecipeEntry, ShoppingItem } from "@/lib/types";
 
 const storageKey = "family-meal-planner-state-v1";
 const sections = [
@@ -50,13 +50,37 @@ function seededState(): AppState {
   return { ...base, shopping: buildShoppingList(base) };
 }
 
+function hydrateState(value: AppState): AppState {
+  const storedRecipes = Array.isArray(value.recipes) ? value.recipes : [];
+  const usableRecipes = storedRecipes.filter((recipe): recipe is RecipeEntry => {
+    const maybeRecipe = recipe as Partial<RecipeEntry>;
+    return Boolean(maybeRecipe.id && maybeRecipe.title && Array.isArray(maybeRecipe.ingredients) && Array.isArray(maybeRecipe.steps));
+  });
+  const recipeIds = new Set(usableRecipes.map((recipe) => recipe.id));
+  const recipes = [...usableRecipes, ...initialState.recipes.filter((recipe) => !recipeIds.has(recipe.id))];
+
+  return {
+    ...initialState,
+    ...value,
+    family: value.family?.length ? value.family : initialState.family,
+    dishes: value.dishes?.length ? value.dishes : initialState.dishes,
+    inventory: value.inventory ?? initialState.inventory,
+    leftovers: value.leftovers ?? initialState.leftovers,
+    freezer: value.freezer ?? initialState.freezer,
+    meals: value.meals?.length ? value.meals : generateWeek(initialState),
+    shopping: value.shopping ?? [],
+    recipes,
+    bannedDishIds: value.bannedDishIds ?? [],
+  };
+}
+
 export default function HomePage() {
   const [state, setState] = useState<AppState>(() => {
     if (typeof window === "undefined") return seededState();
     const raw = window.localStorage.getItem(storageKey);
     if (!raw) return seededState();
     try {
-      return JSON.parse(raw) as AppState;
+      return hydrateState(JSON.parse(raw) as AppState);
     } catch {
       return seededState();
     }
@@ -160,7 +184,7 @@ export default function HomePage() {
 
           {active === "Сегодня" && <TodayView meals={todayMeals} shopping={state.shopping} dishMap={dishMap} onOpenShopping={() => setActive("Покупки")} onReplace={(meal, slot) => setReplaceRequest({ meal, slot })} onRemove={(meal, slot) => commit(removeComponent(state, meal.id, slot), `Убрали ${slotLabels[slot]}.`)} onMove={moveMeal} onRepeat={repeatMeal} onShop={addMealToShopping} onBan={(dish) => commit(banDish(state, dish.id), `${dish.name}: пока не предлагаем.`)} onCook={startCooking} onQuick={handleQuick} />}
           {active === "Меню" && <MenuView meals={state.meals} dishMap={dishMap} regenerate={regenerate} onReplace={(meal, slot) => setReplaceRequest({ meal, slot })} />}
-          {active === "Блюда" && <DishesView dishes={state.dishes} onBan={(dish) => commit(banDish(state, dish.id), `${dish.name}: скрыто из предложений.`)} />}
+          {active === "Блюда" && <DishesView state={state} setState={setState} dishMap={dishMap} onBan={(dish) => commit(banDish(state, dish.id), `${dish.name}: скрыто из предложений.`)} onRecipeToMenu={(recipe) => commit(addRecipeToNextMenu(state, recipe), `${recipe.title}: добавлено в меню на завтра.`)} onRecipeToShopping={(recipe) => commit(addRecipeToShopping(state, recipe), `${recipe.title}: ингредиенты добавлены в покупки.`)} />}
           {active === "Семья" && <FamilyView state={state} setState={setState} />}
           {active === "Кухня" && <KitchenView state={state} dishMap={dishMap} commit={commit} />}
           {active === "Остатки" && <LeftoversView state={state} />}
@@ -223,9 +247,131 @@ function MenuView({ meals, dishMap, regenerate, onReplace }: { meals: MealPlan[]
   return <div className="space-y-4"><div className="flex flex-wrap gap-2"><Button onClick={() => regenerate("balanced")}>Сгенерировать неделю</Button><Button variant="soft" onClick={() => regenerate("simple")}>Будни проще</Button><Button variant="soft" onClick={() => regenerate("leftovers")}>Использовать остатки</Button><Button variant="soft" onClick={() => regenerate("freezer")}>Взять из морозилки</Button></div><div className="grid gap-4 xl:grid-cols-2">{Object.entries(grouped).map(([date, dayMeals]) => <Card key={date}><CardHeader><CardTitle>{new Date(date).toLocaleDateString("ru-RU", { weekday: "long", day: "numeric", month: "long" })}</CardTitle></CardHeader><CardContent className="space-y-3">{dayMeals?.map((meal) => <div key={meal.id} className="rounded-2xl bg-white p-4"><p className="font-black">{mealLabel(meal.kind)}</p>{meal.components.map((component) => <button key={component.slot} onClick={() => onReplace(meal, component.slot)} className="mt-2 block w-full rounded-xl border border-border px-3 py-2 text-left text-sm hover:bg-[#FFF3D6]"><b>{slotLabels[component.slot]}:</b> {dishMap.get(component.dishId)?.name}</button>)}</div>)}</CardContent></Card>)}</div></div>;
 }
 
-function DishesView({ dishes, onBan }: { dishes: DishComponent[]; onBan: (dish: DishComponent) => void }) {
-  const grouped = Object.groupBy(dishes, (dish) => dish.role);
-  return <div className="grid gap-4 xl:grid-cols-2">{Object.entries(grouped).map(([role, items]) => <Card key={role}><CardHeader><CardTitle>{role} · {items?.length ?? 0}</CardTitle></CardHeader><CardContent className="grid gap-2">{items?.map((dish) => <div key={dish.id} className="flex items-center justify-between gap-3 rounded-xl bg-white p-3"><span className="font-semibold">{dish.name}</span><Button variant="ghost" size="sm" onClick={() => onBan(dish)}>Не предлагать</Button></div>)}</CardContent></Card>)}</div>;
+function DishesView({ state, setState, dishMap, onBan, onRecipeToMenu, onRecipeToShopping }: { state: AppState; setState: (state: AppState) => void; dishMap: Map<string, DishComponent>; onBan: (dish: DishComponent) => void; onRecipeToMenu: (recipe: RecipeEntry) => void; onRecipeToShopping: (recipe: RecipeEntry) => void }) {
+  const [query, setQuery] = useState("");
+  const [category, setCategory] = useState("все");
+  const [selectedId, setSelectedId] = useState(state.recipes[0]?.id ?? "");
+  const categories = ["все", ...Array.from(new Set(state.recipes.flatMap((recipe) => recipe.categories))).sort((a, b) => a.localeCompare(b, "ru"))];
+  const filteredRecipes = state.recipes.filter((recipe) => {
+    const text = `${recipe.title} ${recipe.categories.join(" ")} ${recipe.ingredients.map((item) => item.name).join(" ")}`.toLowerCase();
+    return (category === "все" || recipe.categories.includes(category)) && text.includes(query.toLowerCase());
+  });
+  const selected = state.recipes.find((recipe) => recipe.id === selectedId) ?? filteredRecipes[0] ?? state.recipes[0];
+  const selectedDish = selected?.linkedDishIds?.map((id) => dishMap.get(id)).find(Boolean);
+  const grouped = Object.groupBy(state.dishes, (dish) => dish.role);
+
+  function updateRecipe(recipeId: string, patch: Partial<RecipeEntry>) {
+    setState({ ...state, recipes: state.recipes.map((recipe) => recipe.id === recipeId ? { ...recipe, ...patch } : recipe) });
+  }
+
+  function toggleMember(recipe: RecipeEntry, memberId: string, field: "likedBy" | "dislikedBy") {
+    const otherField = field === "likedBy" ? "dislikedBy" : "likedBy";
+    const current = new Set(recipe[field]);
+    const other = new Set(recipe[otherField]);
+    if (current.has(memberId)) current.delete(memberId);
+    else {
+      current.add(memberId);
+      other.delete(memberId);
+    }
+    updateRecipe(recipe.id, { [field]: Array.from(current), [otherField]: Array.from(other) });
+  }
+
+  return <div className="grid gap-5 xl:grid-cols-[1fr_420px]">
+    <div className="space-y-4">
+      <Card>
+        <CardHeader className="space-y-3">
+          <div>
+            <CardTitle>Рецепты</CardTitle>
+            <p className="text-sm text-muted-foreground">Первое ядро как в Paprika: категории, ингредиенты, шаги, рейтинг, избранное и семейные реакции.</p>
+          </div>
+          <div className="grid gap-2 md:grid-cols-[1fr_180px]">
+            <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Найти рецепт: сырники, курица, суп, салат" />
+            <select className="min-h-11 rounded-xl border border-input bg-white px-4 text-sm font-semibold shadow-sm" value={category} onChange={(event) => setCategory(event.target.value)}>
+              {categories.map((item) => <option key={item} value={item}>{item}</option>)}
+            </select>
+          </div>
+        </CardHeader>
+      </Card>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        {filteredRecipes.map((recipe) => {
+          const dish = recipe.linkedDishIds?.map((id) => dishMap.get(id)).find(Boolean);
+          const likedNames = state.family.filter((member) => recipe.likedBy.includes(member.id)).map((member) => member.name);
+          return <button key={recipe.id} onClick={() => setSelectedId(recipe.id)} className={`rounded-2xl border bg-[#fffdf6] p-4 text-left shadow-[0_12px_30px_rgba(129,83,43,0.08)] transition hover:-translate-y-0.5 ${selected?.id === recipe.id ? "border-[#4F7C5D] ring-2 ring-[#cfe6d3]" : "border-[#e2d6c4]"}`}>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-black uppercase text-[#4F7C5D]">{recipe.categories.slice(0, 2).join(" · ")}</p>
+                <h3 className="mt-1 text-lg font-black">{recipe.title}</h3>
+              </div>
+              <span className="flex items-center gap-1 rounded-full bg-[#fff1c9] px-2 py-1 text-sm font-black text-[#6f4b16]"><Star size={14} />{recipe.rating}</span>
+            </div>
+            <p className="mt-2 text-sm text-muted-foreground">{recipe.servings} порции · {recipe.prepMinutes ?? 0}+{recipe.cookMinutes ?? 0} мин · {dish?.kidsFriendly ? "детям ок" : "лучше взрослым"}</p>
+            <p className="mt-3 line-clamp-2 text-sm text-[#40504A]">{recipe.ingredients.map((item) => item.name).slice(0, 5).join(", ")}</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {recipe.favorite && <span className="rounded-full bg-[#edf7ed] px-2 py-1 text-xs font-bold text-[#285f3b]">избранное</span>}
+              {likedNames.slice(0, 2).map((name) => <span key={name} className="rounded-full border border-[#ead7bd] bg-white px-2 py-1 text-xs font-bold text-[#40504A]">{name} любит</span>)}
+            </div>
+          </button>;
+        })}
+      </div>
+
+      <details className="rounded-2xl border border-[#e2d6c4] bg-[#fffdf6] p-4">
+        <summary className="cursor-pointer font-black">Компоненты меню: старый список блюд</summary>
+        <div className="mt-4 grid gap-4 xl:grid-cols-2">
+          {Object.entries(grouped).map(([role, items]) => <Card key={role}><CardHeader><CardTitle>{role} · {items?.length ?? 0}</CardTitle></CardHeader><CardContent className="grid gap-2">{items?.map((dish) => <div key={dish.id} className="flex items-center justify-between gap-3 rounded-xl bg-white p-3"><span className="font-semibold">{dish.name}</span><Button variant="ghost" size="sm" onClick={() => onBan(dish)}>Не предлагать</Button></div>)}</CardContent></Card>)}
+        </div>
+      </details>
+    </div>
+
+    {selected && <Card className="xl:sticky xl:top-5 xl:self-start">
+      <CardHeader className="space-y-3">
+        {selectedDish && <img src={photoForDish(selectedDish)} alt="" className="h-44 w-full rounded-2xl object-cover shadow-[0_12px_30px_rgba(129,83,43,0.12)]" />}
+        <div>
+          <div className="flex items-start justify-between gap-3">
+            <CardTitle>{selected.title}</CardTitle>
+            <Button variant={selected.favorite ? "soft" : "outline"} size="sm" onClick={() => updateRecipe(selected.id, { favorite: !selected.favorite })}><Heart size={15} />{selected.favorite ? "Любимое" : "В любимые"}</Button>
+          </div>
+          <p className="mt-2 text-sm text-muted-foreground">{selected.source ?? "семейная база"} · {selected.categories.join(", ")}</p>
+        </div>
+        <div className="grid grid-cols-3 gap-2 text-center text-sm">
+          <div className="rounded-xl bg-[#fff1c9] p-2"><b>{selected.servings}</b><br />порции</div>
+          <div className="rounded-xl bg-[#edf7ed] p-2"><b>{(selected.prepMinutes ?? 0) + (selected.cookMinutes ?? 0)}</b><br />мин</div>
+          <div className="rounded-xl bg-white p-2"><b>{selected.rating}/5</b><br />рейтинг</div>
+        </div>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <Button onClick={() => onRecipeToMenu(selected)}><Plus size={16} />В меню</Button>
+          <Button variant="outline" onClick={() => onRecipeToShopping(selected)}><ShoppingBasket size={16} />В покупки</Button>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <section>
+          <h3 className="font-black">Кто любит</h3>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {state.family.map((member) => <button key={member.id} onClick={() => toggleMember(selected, member.id, "likedBy")} className={`rounded-full border px-3 py-2 text-sm font-bold ${selected.likedBy.includes(member.id) ? "border-[#4F7C5D] bg-[#edf7ed] text-[#285f3b]" : "border-[#e2d6c4] bg-white text-[#40504A]"}`}>{member.name}</button>)}
+          </div>
+        </section>
+        <section>
+          <h3 className="font-black">Кому не зашло</h3>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {state.family.map((member) => <button key={member.id} onClick={() => toggleMember(selected, member.id, "dislikedBy")} className={`rounded-full border px-3 py-2 text-sm font-bold ${selected.dislikedBy.includes(member.id) ? "border-[#c56a4a] bg-[#fff1c9] text-[#9b4329]" : "border-[#e2d6c4] bg-white text-[#40504A]"}`}>{member.name}</button>)}
+          </div>
+        </section>
+        <section>
+          <h3 className="font-black">Ингредиенты</h3>
+          <ul className="mt-2 space-y-2 text-sm">
+            {selected.ingredients.map((item) => <li key={`${selected.id}-${item.name}`} className="flex items-center justify-between gap-3 rounded-xl bg-white px-3 py-2"><span className="font-semibold">{item.name}</span><span className="text-muted-foreground">{item.amount} {item.unit}</span></li>)}
+          </ul>
+        </section>
+        <section>
+          <h3 className="font-black">Шаги</h3>
+          <ol className="mt-2 space-y-2 text-sm">
+            {selected.steps.map((step, index) => <li key={`${selected.id}-${step}`} className="rounded-xl border border-[#ead7bd] bg-[#fffdf6] p-3"><b>{index + 1}.</b> {step}</li>)}
+          </ol>
+        </section>
+        {selected.notes && <p className="rounded-xl bg-[#FFF3D6] p-3 text-sm">{selected.notes}</p>}
+      </CardContent>
+    </Card>}
+  </div>;
 }
 
 const listToText = (items?: string[]) => items?.join(", ") ?? "";

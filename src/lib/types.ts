@@ -22,6 +22,25 @@ export interface InventoryItem { id: string; product: string; amount: number; un
 export interface Leftover { id: string; name: string; amount: "мало" | "на 1 порцию" | "на 2 порции" | "много"; cookedAt: string; useBy: string; transformInto: string[]; linkedDishIds?: string[]; }
 export interface FreezerItem { id: string; name: string; amount: string; frozenAt: string; useBy: string; serveWith: string[]; linkedDishIds?: string[]; }
 export interface ShoppingItem { id: string; product: string; amount: number; unit: string; category: ShoppingCategory; checked: boolean; alreadyAtHome: boolean; manuallyAdded?: boolean; }
-export interface RecipeDraft { id: string; url: string; title: string; ingredients: string; steps: string; status: "draft" | "ready_for_parser"; }
+export interface RecipeEntry {
+  id: string;
+  title: string;
+  url?: string;
+  source?: string;
+  categories: string[];
+  photoUrl?: string;
+  servings: number;
+  prepMinutes?: number;
+  cookMinutes?: number;
+  rating: number;
+  favorite: boolean;
+  likedBy: string[];
+  dislikedBy: string[];
+  notes?: string;
+  ingredients: IngredientNeed[];
+  steps: string[];
+  linkedDishIds?: string[];
+  status: "draft" | "ready" | "ready_for_parser";
+}
 export interface CookingSession { mealId: string; doneSteps: number[]; timerSeconds: number; eaters: string[]; liked?: "yes" | "mixed" | "no"; leftoversNote?: string; }
-export interface AppState { family: FamilyMember[]; dishes: DishComponent[]; meals: MealPlan[]; inventory: InventoryItem[]; leftovers: Leftover[]; freezer: FreezerItem[]; shopping: ShoppingItem[]; recipes: RecipeDraft[]; bannedDishIds: string[]; cooking?: CookingSession; }
+export interface AppState { family: FamilyMember[]; dishes: DishComponent[]; meals: MealPlan[]; inventory: InventoryItem[]; leftovers: Leftover[]; freezer: FreezerItem[]; shopping: ShoppingItem[]; recipes: RecipeEntry[]; bannedDishIds: string[]; cooking?: CookingSession; }

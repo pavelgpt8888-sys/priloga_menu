@@ -1,4 +1,4 @@
-import type { AppState, DishComponent, DishRole, MealComponent, MealKind, MealPlan, ShoppingItem } from "./types";
+import type { AppState, DishComponent, DishRole, MealComponent, MealKind, MealPlan, RecipeEntry, ShoppingItem } from "./types";
 
 const dayMs = 24 * 60 * 60 * 1000;
 const iso = (date: Date) => date.toISOString().slice(0, 10);
@@ -198,6 +198,53 @@ export function buildShoppingList(state: AppState): ShoppingItem[] {
 export function addManualShoppingItem(state: AppState, product: string): AppState {
   if (!product.trim()) return state;
   return { ...state, shopping: [...state.shopping, { id: `manual-${Date.now()}`, product: product.trim(), amount: 1, unit: "шт", category: "бакалея", checked: false, alreadyAtHome: false, manuallyAdded: true }] };
+}
+
+export function addRecipeToShopping(state: AppState, recipe: RecipeEntry): AppState {
+  const additions = recipe.ingredients.map((ingredient, index): ShoppingItem => ({
+    id: `recipe-${recipe.id}-${index}-${Date.now()}`,
+    product: ingredient.name,
+    amount: ingredient.amount,
+    unit: ingredient.unit,
+    category: ingredient.category,
+    checked: false,
+    alreadyAtHome: false,
+    manuallyAdded: true,
+  }));
+  return { ...state, shopping: [...state.shopping, ...additions] };
+}
+
+function slotForDishRole(roleToUse: DishRole): MealComponent["slot"] {
+  if (roleToUse === "breakfast_base") return "base";
+  if (roleToUse === "breakfast_addon") return "addon";
+  if (roleToUse === "side") return "side";
+  if (roleToUse === "salad") return "salad";
+  if (roleToUse === "kids_vegetables") return "kidsVegetables";
+  if (roleToUse === "soup") return "soup";
+  if (roleToUse === "dessert") return "dessert";
+  return "main";
+}
+
+export function addRecipeToNextMenu(state: AppState, recipe: RecipeEntry): AppState {
+  const dishId = recipe.linkedDishIds?.find((id) => state.dishes.some((dish) => dish.id === id));
+  if (!dishId) return state;
+  const dish = state.dishes.find((item) => item.id === dishId);
+  if (!dish) return state;
+
+  const date = new Date(startOfToday());
+  date.setDate(date.getDate() + 1);
+  const kind: MealKind = dish.role === "breakfast_base" || dish.role === "breakfast_addon" ? "breakfast" : dish.role === "soup" ? "lunch" : "dinner";
+  const meal: MealPlan = {
+    id: `${iso(date)}-${kind}-recipe-${Date.now()}`,
+    date: iso(date),
+    kind,
+    title: recipe.title,
+    source: "manual",
+    notes: "Добавлено из рецептов вручную.",
+    components: [{ slot: slotForDishRole(dish.role), dishId }],
+  };
+  const meals = [...state.meals, meal];
+  return { ...state, meals, shopping: buildShoppingList({ ...state, meals }) };
 }
 
 export function applyQuickScenario(state: AppState, scenario: string): { state: AppState; message: string } {
