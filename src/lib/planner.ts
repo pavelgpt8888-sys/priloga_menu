@@ -201,17 +201,28 @@ export function addManualShoppingItem(state: AppState, product: string): AppStat
 }
 
 export function addRecipeToShopping(state: AppState, recipe: RecipeEntry): AppState {
-  const additions = recipe.ingredients.map((ingredient, index): ShoppingItem => ({
-    id: `recipe-${recipe.id}-${index}-${Date.now()}`,
-    product: ingredient.name,
-    amount: ingredient.amount,
-    unit: ingredient.unit,
-    category: ingredient.category,
-    checked: false,
-    alreadyAtHome: false,
-    manuallyAdded: true,
-  }));
-  return { ...state, shopping: [...state.shopping, ...additions] };
+  const shopping = [...state.shopping];
+  recipe.ingredients.forEach((ingredient) => {
+    const existing = shopping.find((item) =>
+      item.product.toLowerCase() === ingredient.name.toLowerCase()
+      && item.unit === ingredient.unit
+      && item.category === ingredient.category
+      && !item.checked
+      && !item.alreadyAtHome
+    );
+    if (existing) existing.amount += ingredient.amount;
+    else shopping.push({
+      id: `recipe-${recipe.id}-${ingredient.name.toLowerCase()}-${Date.now()}`,
+      product: ingredient.name,
+      amount: ingredient.amount,
+      unit: ingredient.unit,
+      category: ingredient.category,
+      checked: false,
+      alreadyAtHome: false,
+      manuallyAdded: true,
+    });
+  });
+  return { ...state, shopping };
 }
 
 function slotForDishRole(roleToUse: DishRole): MealComponent["slot"] {

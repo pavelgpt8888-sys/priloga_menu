@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { initialState } from "@/lib/demo-data";
 import { addManualShoppingItem, addRecipeToNextMenu, addRecipeToShopping, applyQuickScenario, banDish, buildShoppingList, byId, generateWeek, mealLabel, parseCommand, removeComponent, replaceComponent, replacementOptions, replaceComponentWithDish, startOfToday } from "@/lib/planner";
-import type { AppState, CookingSession, DishComponent, FamilyMember, MealComponent, MealPlan, RecipeEntry, ShoppingItem } from "@/lib/types";
+import type { AppState, CookingSession, DishComponent, FamilyMember, IngredientNeed, MealComponent, MealPlan, RecipeEntry, ShoppingCategory, ShoppingItem } from "@/lib/types";
 
 const storageKey = "family-meal-planner-state-v1";
 const sections = [
@@ -251,6 +251,7 @@ function DishesView({ state, setState, dishMap, onBan, onRecipeToMenu, onRecipeT
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("все");
   const [selectedId, setSelectedId] = useState(state.recipes[0]?.id ?? "");
+  const [editing, setEditing] = useState(false);
   const categories = ["все", ...Array.from(new Set(state.recipes.flatMap((recipe) => recipe.categories))).sort((a, b) => a.localeCompare(b, "ru"))];
   const filteredRecipes = state.recipes.filter((recipe) => {
     const text = `${recipe.title} ${recipe.categories.join(" ")} ${recipe.ingredients.map((item) => item.name).join(" ")}`.toLowerCase();
@@ -262,6 +263,37 @@ function DishesView({ state, setState, dishMap, onBan, onRecipeToMenu, onRecipeT
 
   function updateRecipe(recipeId: string, patch: Partial<RecipeEntry>) {
     setState({ ...state, recipes: state.recipes.map((recipe) => recipe.id === recipeId ? { ...recipe, ...patch } : recipe) });
+  }
+
+  function createRecipe() {
+    const recipe: RecipeEntry = {
+      id: `recipe-manual-${Date.now()}`,
+      title: "Новый семейный рецепт",
+      source: "ручной ввод",
+      categories: ["мои рецепты"],
+      servings: 4,
+      prepMinutes: 10,
+      cookMinutes: 30,
+      rating: 3,
+      favorite: false,
+      likedBy: [],
+      dislikedBy: [],
+      notes: "Заполните рецепт и отметьте, кому он нравится.",
+      ingredients: [{ name: "продукт", amount: 1, unit: "шт", category: "бакалея" }],
+      steps: ["Описать первый шаг"],
+      status: "draft",
+    };
+    setState({ ...state, recipes: [recipe, ...state.recipes] });
+    setSelectedId(recipe.id);
+    setEditing(true);
+  }
+
+  function deleteRecipe(recipeId: string) {
+    if (state.recipes.length <= 1) return;
+    const recipes = state.recipes.filter((recipe) => recipe.id !== recipeId);
+    setState({ ...state, recipes });
+    setSelectedId(recipes[0]?.id ?? "");
+    setEditing(false);
   }
 
   function toggleMember(recipe: RecipeEntry, memberId: string, field: "likedBy" | "dislikedBy") {
@@ -280,9 +312,12 @@ function DishesView({ state, setState, dishMap, onBan, onRecipeToMenu, onRecipeT
     <div className="space-y-4">
       <Card>
         <CardHeader className="space-y-3">
-          <div>
-            <CardTitle>Рецепты</CardTitle>
-            <p className="text-sm text-muted-foreground">Первое ядро как в Paprika: категории, ингредиенты, шаги, рейтинг, избранное и семейные реакции.</p>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <CardTitle>Рецепты</CardTitle>
+              <p className="text-sm text-muted-foreground">Первое ядро как в Paprika: категории, ингредиенты, шаги, рейтинг, избранное и семейные реакции.</p>
+            </div>
+            <Button variant="soft" onClick={createRecipe}><Plus size={16} />Новый рецепт</Button>
           </div>
           <div className="grid gap-2 md:grid-cols-[1fr_180px]">
             <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Найти рецепт: сырники, курица, суп, салат" />
@@ -338,12 +373,56 @@ function DishesView({ state, setState, dishMap, onBan, onRecipeToMenu, onRecipeT
           <div className="rounded-xl bg-[#edf7ed] p-2"><b>{(selected.prepMinutes ?? 0) + (selected.cookMinutes ?? 0)}</b><br />мин</div>
           <div className="rounded-xl bg-white p-2"><b>{selected.rating}/5</b><br />рейтинг</div>
         </div>
-        <div className="grid gap-2 sm:grid-cols-2">
+        <div className="grid gap-2 sm:grid-cols-3">
           <Button onClick={() => onRecipeToMenu(selected)}><Plus size={16} />В меню</Button>
           <Button variant="outline" onClick={() => onRecipeToShopping(selected)}><ShoppingBasket size={16} />В покупки</Button>
+          <Button variant="soft" onClick={() => setEditing(!editing)}>{editing ? "Готово" : "Править"}</Button>
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
+        {editing && <section className="space-y-3 rounded-2xl border border-[#ead7bd] bg-[#fffaf2] p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h3 className="font-black">Редактор рецепта</h3>
+              <p className="text-sm text-muted-foreground">Формат ингредиента: название | количество | единица | категория.</p>
+            </div>
+            <Button variant="danger" size="sm" onClick={() => deleteRecipe(selected.id)} disabled={state.recipes.length <= 1}>Удалить</Button>
+          </div>
+          <label className="grid gap-1 text-sm font-semibold">Название
+            <Input value={selected.title} onChange={(event) => updateRecipe(selected.id, { title: event.target.value })} />
+          </label>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <label className="grid gap-1 text-sm font-semibold">Порции
+              <Input type="number" min={1} value={selected.servings} onChange={(event) => updateRecipe(selected.id, { servings: Number(event.target.value) || 1 })} />
+            </label>
+            <label className="grid gap-1 text-sm font-semibold">Подготовка, мин
+              <Input type="number" min={0} value={selected.prepMinutes ?? 0} onChange={(event) => updateRecipe(selected.id, { prepMinutes: Number(event.target.value) || 0 })} />
+            </label>
+            <label className="grid gap-1 text-sm font-semibold">Готовка, мин
+              <Input type="number" min={0} value={selected.cookMinutes ?? 0} onChange={(event) => updateRecipe(selected.id, { cookMinutes: Number(event.target.value) || 0 })} />
+            </label>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-[1fr_110px]">
+            <label className="grid gap-1 text-sm font-semibold">Категории
+              <Input value={listToText(selected.categories)} onChange={(event) => updateRecipe(selected.id, { categories: textToList(event.target.value) })} placeholder="завтраки, будни, детям" />
+            </label>
+            <label className="grid gap-1 text-sm font-semibold">Рейтинг
+              <Input type="number" min={1} max={5} value={selected.rating} onChange={(event) => updateRecipe(selected.id, { rating: Math.min(5, Math.max(1, Number(event.target.value) || 1)) })} />
+            </label>
+          </div>
+          <label className="grid gap-1 text-sm font-semibold">Источник или ссылка
+            <Input value={selected.url ?? selected.source ?? ""} onChange={(event) => updateRecipe(selected.id, { url: event.target.value, source: event.target.value ? "ссылка/заметка" : "ручной ввод" })} placeholder="ссылка на рецепт или семейная заметка" />
+          </label>
+          <label className="grid gap-1 text-sm font-semibold">Ингредиенты
+            <Textarea className="min-h-36 font-mono text-xs" value={ingredientsToText(selected.ingredients)} onChange={(event) => updateRecipe(selected.id, { ingredients: textToIngredients(event.target.value) })} />
+          </label>
+          <label className="grid gap-1 text-sm font-semibold">Шаги
+            <Textarea className="min-h-32" value={selected.steps.join("\n")} onChange={(event) => updateRecipe(selected.id, { steps: event.target.value.split("\n").map((step) => step.trim()).filter(Boolean) })} />
+          </label>
+          <label className="grid gap-1 text-sm font-semibold">Заметки
+            <Textarea value={selected.notes ?? ""} onChange={(event) => updateRecipe(selected.id, { notes: event.target.value })} placeholder="Например: детям без лука, подавать со сметаной, хорошо идет на выходных." />
+          </label>
+        </section>}
         <section>
           <h3 className="font-black">Кто любит</h3>
           <div className="mt-2 flex flex-wrap gap-2">
@@ -376,6 +455,19 @@ function DishesView({ state, setState, dishMap, onBan, onRecipeToMenu, onRecipeT
 
 const listToText = (items?: string[]) => items?.join(", ") ?? "";
 const textToList = (value: string) => value.split(",").map((item) => item.trim()).filter(Boolean);
+const knownCategories: ShoppingCategory[] = ["овощи и фрукты", "мясо и птица", "рыба", "молочные", "хлеб", "крупы и макароны", "бакалея", "заморозка", "специи", "сладкое", "бытовое"];
+
+function ingredientsToText(items: IngredientNeed[]) {
+  return items.map((item) => `${item.name} | ${item.amount} | ${item.unit} | ${item.category}`).join("\n");
+}
+
+function textToIngredients(value: string): IngredientNeed[] {
+  return value.split("\n").map((line) => {
+    const [name = "", amount = "1", unit = "шт", category = "бакалея"] = line.split("|").map((item) => item.trim());
+    const safeCategory = knownCategories.includes(category as ShoppingCategory) ? category as ShoppingCategory : "бакалея";
+    return { name, amount: Number(amount.replace(",", ".")) || 1, unit: unit || "шт", category: safeCategory };
+  }).filter((item) => item.name);
+}
 
 function FamilyView({ state, setState }: { state: AppState; setState: (state: AppState) => void }) {
   function updateMember(memberId: string, patch: Partial<FamilyMember>) {
