@@ -188,7 +188,7 @@ export default function HomePage() {
             commit(planned, `${mealLabel(kind)} на ${new Date(date).toLocaleDateString("ru-RU", { day: "numeric", month: "long" })}: ${recipe.title}.`);
           }} onMoveMealToDate={(meal, date) => commit(moveMealToDate(state, meal.id, date), `${mealLabel(meal.kind)} перенесен на ${new Date(date).toLocaleDateString("ru-RU", { day: "numeric", month: "long" })}.`)} onOpenShopping={() => setActive("Покупки")} />}
           {active === "Блюда" && <DishesView state={state} setState={setState} dishMap={dishMap} onBan={(dish) => commit(banDish(state, dish.id), `${dish.name}: скрыто из предложений.`)} onRecipeToMenu={(recipe) => commit(addRecipeToNextMenu(state, recipe), `${recipe.title}: добавлено в меню на завтра.`)} onRecipeToShopping={(recipe) => commit(addRecipeToShopping(state, recipe), `${recipe.title}: ингредиенты добавлены в покупки.`)} />}
-          {active === "Семья" && <FamilyView state={state} setState={setState} />}
+          {active === "Семья" && <FamilyView state={state} setState={setState} onRebuild={() => regenerate("balanced")} />}
           {active === "Кухня" && <KitchenView state={state} dishMap={dishMap} commit={commit} />}
           {active === "Остатки" && <LeftoversView state={state} />}
           {active === "Морозилка" && <FreezerView state={state} />}
@@ -580,7 +580,7 @@ function textToIngredients(value: string): IngredientNeed[] {
   }).filter((item) => item.name);
 }
 
-function FamilyView({ state, setState }: { state: AppState; setState: (state: AppState) => void }) {
+function FamilyView({ state, setState, onRebuild }: { state: AppState; setState: (state: AppState) => void; onRebuild: () => void }) {
   function updateMember(memberId: string, patch: Partial<FamilyMember>) {
     setState({ ...state, family: state.family.map((member) => member.id === memberId ? { ...member, ...patch } : member) });
   }
@@ -613,7 +613,10 @@ function FamilyView({ state, setState }: { state: AppState; setState: (state: Ap
           <CardTitle>Профили семьи</CardTitle>
           <p className="text-sm text-muted-foreground">Личные данные, вкусы и ограничения сохраняются в этом браузере автоматически.</p>
         </div>
-        <Button variant="soft" onClick={addMember}>Добавить участника</Button>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={onRebuild}>Пересобрать меню по профилям</Button>
+          <Button variant="soft" onClick={addMember}>Добавить участника</Button>
+        </div>
       </CardHeader>
     </Card>
     <div className="grid gap-4 xl:grid-cols-2">
