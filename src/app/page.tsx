@@ -1,14 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { CalendarDays, ChefHat, ClipboardList, Home, IceCreamBowl, ListChecks, RotateCcw, Settings, ShoppingBasket, Snowflake, Soup, Users, Warehouse } from "lucide-react";
+import { CalendarDays, ChefHat, Home, IceCreamBowl, ListChecks, RotateCcw, Settings, ShoppingBasket, Snowflake, Soup, Users, Warehouse } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { initialState } from "@/lib/demo-data";
 import { addManualShoppingItem, applyQuickScenario, banDish, buildShoppingList, byId, generateWeek, mealLabel, parseCommand, removeComponent, replaceComponent, replacementOptions, replaceComponentWithDish, startOfToday } from "@/lib/planner";
-import type { AppState, CookingSession, DishComponent, MealComponent, MealPlan, ShoppingItem } from "@/lib/types";
+import type { AppState, CookingSession, DishComponent, FamilyMember, MealComponent, MealPlan, ShoppingItem } from "@/lib/types";
 
 const storageKey = "family-meal-planner-state-v1";
 const sections = [
@@ -51,7 +51,16 @@ function seededState(): AppState {
 }
 
 export default function HomePage() {
-  const [state, setState] = useState<AppState>(() => seededState());
+  const [state, setState] = useState<AppState>(() => {
+    if (typeof window === "undefined") return seededState();
+    const raw = window.localStorage.getItem(storageKey);
+    if (!raw) return seededState();
+    try {
+      return JSON.parse(raw) as AppState;
+    } catch {
+      return seededState();
+    }
+  });
   const [active, setActive] = useState<(typeof sections)[number][0]>("Сегодня");
   const [toast, setToast] = useState("Готово: меню на неделю собрано из демо-данных.");
   const [undo, setUndo] = useState<AppState | null>(null);
@@ -62,11 +71,6 @@ export default function HomePage() {
   const dishMap = useMemo(() => byId(state.dishes), [state.dishes]);
   const today = startOfToday().toISOString().slice(0, 10);
   const todayMeals = state.meals.filter((meal) => meal.date === today);
-
-  useEffect(() => {
-    const raw = localStorage.getItem(storageKey);
-    if (raw) setState(JSON.parse(raw) as AppState);
-  }, []);
 
   useEffect(() => {
     localStorage.setItem(storageKey, JSON.stringify(state));
@@ -157,7 +161,7 @@ export default function HomePage() {
           {active === "Сегодня" && <TodayView meals={todayMeals} shopping={state.shopping} dishMap={dishMap} onOpenShopping={() => setActive("Покупки")} onReplace={(meal, slot) => setReplaceRequest({ meal, slot })} onRemove={(meal, slot) => commit(removeComponent(state, meal.id, slot), `Убрали ${slotLabels[slot]}.`)} onMove={moveMeal} onRepeat={repeatMeal} onShop={addMealToShopping} onBan={(dish) => commit(banDish(state, dish.id), `${dish.name}: пока не предлагаем.`)} onCook={startCooking} onQuick={handleQuick} />}
           {active === "Меню" && <MenuView meals={state.meals} dishMap={dishMap} regenerate={regenerate} onReplace={(meal, slot) => setReplaceRequest({ meal, slot })} />}
           {active === "Блюда" && <DishesView dishes={state.dishes} onBan={(dish) => commit(banDish(state, dish.id), `${dish.name}: скрыто из предложений.`)} />}
-          {active === "Семья" && <FamilyView state={state} />}
+          {active === "Семья" && <FamilyView state={state} setState={setState} />}
           {active === "Кухня" && <KitchenView state={state} dishMap={dishMap} commit={commit} />}
           {active === "Остатки" && <LeftoversView state={state} />}
           {active === "Морозилка" && <FreezerView state={state} />}
@@ -224,7 +228,86 @@ function DishesView({ dishes, onBan }: { dishes: DishComponent[]; onBan: (dish: 
   return <div className="grid gap-4 xl:grid-cols-2">{Object.entries(grouped).map(([role, items]) => <Card key={role}><CardHeader><CardTitle>{role} · {items?.length ?? 0}</CardTitle></CardHeader><CardContent className="grid gap-2">{items?.map((dish) => <div key={dish.id} className="flex items-center justify-between gap-3 rounded-xl bg-white p-3"><span className="font-semibold">{dish.name}</span><Button variant="ghost" size="sm" onClick={() => onBan(dish)}>Не предлагать</Button></div>)}</CardContent></Card>)}</div>;
 }
 
-function FamilyView({ state }: { state: AppState }) { return <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">{state.family.map((member) => <Card key={member.id}><CardHeader><CardTitle>{member.name}</CardTitle></CardHeader><CardContent><p className="text-muted-foreground">{member.age} лет · {member.role === "adult" ? "взрослый" : member.role === "teen" ? "подросток" : "ребенок"}</p><p className="mt-3 rounded-xl bg-[#FFF3D6] p-3 text-sm">{member.dislikes?.length ? `Не любит: ${member.dislikes.join(", ")}` : "Без особых ограничений"}</p></CardContent></Card>)}</div>; }
+const listToText = (items?: string[]) => items?.join(", ") ?? "";
+const textToList = (value: string) => value.split(",").map((item) => item.trim()).filter(Boolean);
+
+function FamilyView({ state, setState }: { state: AppState; setState: (state: AppState) => void }) {
+  function updateMember(memberId: string, patch: Partial<FamilyMember>) {
+    setState({ ...state, family: state.family.map((member) => member.id === memberId ? { ...member, ...patch } : member) });
+  }
+
+  function addMember() {
+    const nextIndex = state.family.length + 1;
+    const member: FamilyMember = {
+      id: `family-${Date.now()}`,
+      name: `Участник ${nextIndex}`,
+      age: 18,
+      role: "adult",
+      dislikes: [],
+      likes: [],
+      favoriteDishes: [],
+      restrictions: [],
+      notes: "",
+    };
+    setState({ ...state, family: [...state.family, member] });
+  }
+
+  function removeMember(memberId: string) {
+    if (state.family.length <= 1) return;
+    setState({ ...state, family: state.family.filter((member) => member.id !== memberId) });
+  }
+
+  return <div className="space-y-4">
+    <Card>
+      <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <CardTitle>Профили семьи</CardTitle>
+          <p className="text-sm text-muted-foreground">Личные данные, вкусы и ограничения сохраняются в этом браузере автоматически.</p>
+        </div>
+        <Button variant="soft" onClick={addMember}>Добавить участника</Button>
+      </CardHeader>
+    </Card>
+    <div className="grid gap-4 xl:grid-cols-2">
+      {state.family.map((member) => <Card key={member.id}>
+        <CardHeader className="flex flex-row items-start justify-between gap-3">
+          <div>
+            <CardTitle>{member.name || "Без имени"}</CardTitle>
+            <p className="text-sm text-muted-foreground">{member.age || 0} лет · {member.role === "adult" ? "взрослый" : member.role === "teen" ? "подросток" : "ребенок"}</p>
+          </div>
+          <Button variant="ghost" size="sm" onClick={() => removeMember(member.id)} disabled={state.family.length <= 1}>Удалить</Button>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="grid gap-3 sm:grid-cols-[1fr_110px]">
+            <label className="grid gap-1 text-sm font-semibold">Имя<Input value={member.name} onChange={(event) => updateMember(member.id, { name: event.target.value })} /></label>
+            <label className="grid gap-1 text-sm font-semibold">Возраст<Input type="number" min={0} max={120} value={member.age} onChange={(event) => updateMember(member.id, { age: Number(event.target.value) || 0 })} /></label>
+          </div>
+          <label className="grid gap-1 text-sm font-semibold">Роль
+            <select className="min-h-11 rounded-xl border border-input bg-white px-4 text-sm shadow-sm" value={member.role} onChange={(event) => updateMember(member.id, { role: event.target.value as FamilyMember["role"] })}>
+              <option value="adult">Взрослый</option>
+              <option value="teen">Подросток</option>
+              <option value="child">Ребенок</option>
+            </select>
+          </label>
+          <label className="grid gap-1 text-sm font-semibold">Любит есть
+            <Input value={listToText(member.likes)} onChange={(event) => updateMember(member.id, { likes: textToList(event.target.value) })} placeholder="сырники, курица, овощи" />
+          </label>
+          <label className="grid gap-1 text-sm font-semibold">Любимые блюда
+            <Input value={listToText(member.favoriteDishes)} onChange={(event) => updateMember(member.id, { favoriteDishes: textToList(event.target.value) })} placeholder="драники, плов, борщ" />
+          </label>
+          <label className="grid gap-1 text-sm font-semibold">Не любит
+            <Input value={listToText(member.dislikes)} onChange={(event) => updateMember(member.id, { dislikes: textToList(event.target.value) })} placeholder="лук, рыба, сложные салаты" />
+          </label>
+          <label className="grid gap-1 text-sm font-semibold">Ограничения
+            <Input value={listToText(member.restrictions)} onChange={(event) => updateMember(member.id, { restrictions: textToList(event.target.value) })} placeholder="без острого, меньше сахара, аллергия" />
+          </label>
+          <label className="grid gap-1 text-sm font-semibold">Заметки
+            <Textarea value={member.notes ?? ""} onChange={(event) => updateMember(member.id, { notes: event.target.value })} placeholder="Например: на завтрак лучше без сладкого, овощи отдельно, суп ест только куриный." />
+          </label>
+        </CardContent>
+      </Card>)}
+    </div>
+  </div>;
+}
 
 function KitchenView({ state, dishMap, commit }: { state: AppState; dishMap: Map<string, DishComponent>; commit: (next: AppState, message: string) => void }) {
   const session = state.cooking;

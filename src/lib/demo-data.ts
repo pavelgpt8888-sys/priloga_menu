@@ -10,10 +10,10 @@ const d = (name: string, role: DishRole, ingredients: IngredientNeed[], extra: P
 });
 
 export const family: FamilyMember[] = [
-  { id: "pavel", name: "Павел", age: 43, role: "adult" },
-  { id: "daria", name: "Дарья", age: 42, role: "adult" },
-  { id: "maxim", name: "Максим", age: 13, role: "teen", dislikes: ["сложные салаты"] },
-  { id: "mikhail", name: "Михаил", age: 7, role: "child", dislikes: ["рыба", "лук"] },
+  { id: "pavel", name: "Павел", age: 43, role: "adult", likes: ["мясо", "драники", "плов"], favoriteDishes: ["Курица запеченная", "Пирог хаш"], restrictions: [], notes: "Нужны сытные ужины без лишней возни в будни." },
+  { id: "daria", name: "Дарья", age: 42, role: "adult", likes: ["овощи", "рыба", "творог"], favoriteDishes: ["Сырники", "Салат огурцы-помидоры"], restrictions: [], notes: "Больше легких блюд и понятный список покупок." },
+  { id: "maxim", name: "Максим", age: 13, role: "teen", dislikes: ["сложные салаты"], likes: ["макароны", "курица", "сыр"], favoriteDishes: ["Макароны по-флотски"], restrictions: [], notes: "Салаты лучше заменять простыми овощами." },
+  { id: "mikhail", name: "Михаил", age: 7, role: "child", dislikes: ["рыба", "лук"], likes: ["картофель", "огурцы", "сырники"], favoriteDishes: ["Картофельное пюре", "Сырники"], restrictions: [], notes: "Нужны простые овощи отдельно от взрослого салата." },
 ];
 
 export const dishes: DishComponent[] = [

@@ -1,0 +1,5 @@
+.next/
+node_modules/
+localtunnel*.log
+.env*.local
+*.tsbuildinfo

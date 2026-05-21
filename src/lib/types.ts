@@ -3,7 +3,17 @@ export type MealKind = "breakfast" | "lunch" | "dinner" | "snack";
 export type StoragePlace = "fridge" | "freezer" | "pantry";
 export type ShoppingCategory = "овощи и фрукты" | "мясо и птица" | "рыба" | "молочные" | "хлеб" | "крупы и макароны" | "бакалея" | "заморозка" | "специи" | "сладкое" | "бытовое";
 
-export interface FamilyMember { id: string; name: string; age: number; role: "adult" | "teen" | "child"; dislikes?: string[]; }
+export interface FamilyMember {
+  id: string;
+  name: string;
+  age: number;
+  role: "adult" | "teen" | "child";
+  dislikes?: string[];
+  likes?: string[];
+  favoriteDishes?: string[];
+  restrictions?: string[];
+  notes?: string;
+}
 export interface IngredientNeed { name: string; amount: number; unit: string; category: ShoppingCategory; }
 export interface DishComponent { id: string; name: string; role: DishRole; effort: "easy" | "medium" | "weekend"; cost: "low" | "medium" | "high"; kidsFriendly: boolean; leftoverFriendly?: boolean; freezerFriendly?: boolean; sweetPastry?: boolean; ingredients: IngredientNeed[]; steps?: string[]; }
 export interface MealComponent { slot: "base" | "addon" | "drink" | "main" | "side" | "salad" | "kidsVegetables" | "soup" | "dessert"; dishId: string; }
