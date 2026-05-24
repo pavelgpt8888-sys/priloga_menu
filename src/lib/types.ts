@@ -43,4 +43,5 @@ export interface RecipeEntry {
   status: "draft" | "ready" | "ready_for_parser";
 }
 export interface CookingSession { mealId: string; doneSteps: number[]; timerSeconds: number; eaters: string[]; liked?: "yes" | "mixed" | "no"; leftoversNote?: string; }
-export interface AppState { family: FamilyMember[]; dishes: DishComponent[]; meals: MealPlan[]; inventory: InventoryItem[]; leftovers: Leftover[]; freezer: FreezerItem[]; shopping: ShoppingItem[]; recipes: RecipeEntry[]; bannedDishIds: string[]; cooking?: CookingSession; }
+export interface MealFeedback { id: string; mealId: string; mealDate: string; eaterIds: string[]; liked: "yes" | "mixed" | "no"; leftoversNote?: string; storedAs: "fridge" | "freezer" | "none"; }
+export interface AppState { family: FamilyMember[]; dishes: DishComponent[]; meals: MealPlan[]; inventory: InventoryItem[]; leftovers: Leftover[]; freezer: FreezerItem[]; shopping: ShoppingItem[]; recipes: RecipeEntry[]; bannedDishIds: string[]; feedback: MealFeedback[]; cooking?: CookingSession; }

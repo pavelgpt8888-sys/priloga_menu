@@ -59,3 +59,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.001ms !important; scroll-behavior: auto !important; transition-duration: 0.001ms !important; }
 }
+
+@media (max-width: 1023px) {
+  body,
+  .app-bg {
+    background: #fffaf2;
+  }
+}

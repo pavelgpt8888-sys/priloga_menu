@@ -193,5 +193,5 @@ export const freezer: FreezerItem[] = [
 ];
 
 export const initialState: AppState = {
-  family, dishes, inventory, leftovers, freezer, meals: [], shopping: [], recipes, bannedDishIds: [],
+  family, dishes, inventory, leftovers, freezer, meals: [], shopping: [], recipes, bannedDishIds: [], feedback: [],
 };

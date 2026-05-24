@@ -1,20 +1,22 @@
 "use client";
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { CalendarDays, Camera, ChefHat, Heart, Home, IceCreamBowl, ListChecks, Plus, RotateCcw, Settings, ShoppingBasket, Snowflake, Soup, Sparkles, Star, Upload, Users, Warehouse } from "lucide-react";
+import { CalendarDays, Camera, ChefHat, Heart, Home, IceCreamBowl, ListChecks, MoreHorizontal, Plus, RotateCcw, Settings, ShoppingBasket, Snowflake, Soup, Sparkles, Star, Upload, Users, Warehouse, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { initialState } from "@/lib/demo-data";
 import { addManualShoppingItem, addRecipeToNextMenu, addRecipeToShopping, applyQuickScenario, banDish, buildShoppingList, byId, generateWeek, mealLabel, moveCheckedShoppingToInventory, moveMealToDate, parseCommand, planRecipeForMeal, removeComponent, replaceComponent, replacementOptions, replaceComponentWithDish, startOfToday } from "@/lib/planner";
-import type { AppState, CookingSession, DishComponent, FamilyMember, IngredientNeed, InventoryItem, MealComponent, MealKind, MealPlan, RecipeEntry, ShoppingCategory, ShoppingItem, StoragePlace } from "@/lib/types";
+import type { AppState, CookingSession, DishComponent, FamilyMember, FreezerItem, IngredientNeed, InventoryItem, Leftover, MealComponent, MealFeedback, MealKind, MealPlan, RecipeEntry, ShoppingCategory, ShoppingItem, StoragePlace } from "@/lib/types";
 
 const storageKey = "family-meal-planner-state-v1";
 const sections = [
   ["Сегодня", Home], ["Меню", CalendarDays], ["Блюда", Soup], ["Семья", Users], ["Кухня", ChefHat],
   ["Остатки", IceCreamBowl], ["Морозилка", Snowflake], ["Запасы", Warehouse], ["Покупки", ShoppingBasket], ["Настройки", Settings],
 ] as const;
+const mobilePrimarySections = [sections[0], sections[1], sections[8], sections[4]] as const;
+const mobileMoreSections = [sections[2], sections[3], sections[5], sections[6], sections[7], sections[9]] as const;
 const quick = ["Нет времени", "Использовать остатки", "Дети это не едят", "Сделать проще", "Сделать дешевле", "Добавить овощи", "Из того, что есть", "Из морозилки"];
 const slotLabels: Record<MealComponent["slot"], string> = {
   base: "основа", addon: "дополнение", drink: "напиток/фрукт/овощи", main: "основное", side: "гарнир", salad: "салат взрослым", kidsVegetables: "овощи детям", soup: "суп", dessert: "десерт",
@@ -46,6 +48,7 @@ function hydrateState(value: AppState): AppState {
     shopping: value.shopping ?? [],
     recipes,
     bannedDishIds: value.bannedDishIds ?? [],
+    feedback: value.feedback ?? [],
   };
 }
 
@@ -61,11 +64,12 @@ export default function HomePage() {
     }
   });
   const [active, setActive] = useState<(typeof sections)[number][0]>("Сегодня");
-  const [toast, setToast] = useState("Готово: меню на неделю собрано из демо-данных.");
+  const [toast, setToast] = useState("");
   const [undo, setUndo] = useState<AppState | null>(null);
   const [command, setCommand] = useState("");
   const [manualProduct, setManualProduct] = useState("");
   const [replaceRequest, setReplaceRequest] = useState<{ meal: MealPlan; slot: MealComponent["slot"] } | null>(null);
+  const [moreOpen, setMoreOpen] = useState(false);
 
   const dishMap = useMemo(() => byId(state.dishes), [state.dishes]);
   const today = startOfToday().toISOString().slice(0, 10);
@@ -103,6 +107,7 @@ export default function HomePage() {
     const session: CookingSession = { mealId: meal.id, doneSteps: [], timerSeconds: 0, eaters: state.family.map((member) => member.id) };
     commit({ ...state, cooking: session }, `Открыт режим готовки: ${meal.title.toLowerCase()}.`);
     setActive("Кухня");
+    setMoreOpen(false);
   }
 
   function addMealToShopping(meal: MealPlan) {
@@ -137,7 +142,30 @@ export default function HomePage() {
         </aside>
 
         <section className="min-w-0 flex-1 space-y-5">
-          <header className="relative overflow-hidden rounded-[1.8rem] border border-[#DCCDB8] bg-[#FFFDF6]/95 p-4 shadow-[0_18px_55px_rgba(63,93,66,0.13)] sm:p-6">
+          <header className="rounded-2xl border border-[#ead7bd] bg-[#fffdf6] p-4 shadow-[0_10px_28px_rgba(129,83,43,0.08)] lg:hidden">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-3">
+                <div className="grid size-10 shrink-0 place-items-center rounded-xl bg-primary text-white"><ChefHat size={21} /></div>
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-black">Домашний диспетчер еды</p>
+                  <p className="text-xs text-muted-foreground">{new Date().toLocaleDateString("ru-RU", { weekday: "long", day: "numeric", month: "long" })}</p>
+                </div>
+              </div>
+              <button onClick={() => { setActive("Покупки"); setMoreOpen(false); }} className="relative grid size-11 shrink-0 place-items-center rounded-xl border border-[#ead7bd] bg-white text-[#40504A]" aria-label="Покупки">
+                <ShoppingBasket size={20} />
+                {state.shopping.length > 0 && <span className="absolute -right-1 -top-1 rounded-full bg-primary px-1.5 text-[10px] font-bold text-white">{state.shopping.length}</span>}
+              </button>
+            </div>
+            {active === "Сегодня" && <div className="mt-4 flex flex-wrap gap-2">{state.family.map((member) => <span key={member.id} className="rounded-full bg-[#fff0dc] px-3 py-1.5 text-xs font-bold text-[#40504A]">{member.name}</span>)}</div>}
+            <details className="mt-4 rounded-xl border border-[#ead7bd] bg-white px-3 py-2">
+              <summary className="cursor-pointer text-sm font-semibold text-[#40504A]">Изменить меню текстом</summary>
+              <form onSubmit={handleCommand} className="mt-3 grid gap-2">
+                <Input value={command} onChange={(event) => setCommand(event.target.value)} placeholder="Например: замени завтра гречку" />
+                <Button type="submit">Применить</Button>
+              </form>
+            </details>
+          </header>
+          <header className="relative hidden overflow-hidden rounded-[1.8rem] border border-[#DCCDB8] bg-[#FFFDF6]/95 p-4 shadow-[0_18px_55px_rgba(63,93,66,0.13)] sm:p-6 lg:block">
             <div className="pointer-events-none absolute right-0 top-0 h-full w-72 bg-[radial-gradient(circle_at_70%_30%,rgba(228,179,90,0.28),transparent_34%),linear-gradient(135deg,transparent,#edf7ed)]" />
             <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
               <div>
@@ -146,7 +174,7 @@ export default function HomePage() {
               </div>
               <div className="flex flex-wrap gap-2">
                 {state.family.map((member) => <span key={member.id} className="rounded-full border border-[#dccdb8] bg-[#fffdf6] px-3 py-2 text-sm font-semibold text-[#40504A] shadow-sm">{member.name}, {member.age}</span>)}
-                <Button variant="soft" onClick={() => setActive("Покупки")}><ShoppingBasket size={17} />Открыть покупки · {state.shopping.length}</Button>
+                <Button variant="soft" onClick={() => { setActive("Покупки"); setMoreOpen(false); }}><ShoppingBasket size={17} />Открыть покупки · {state.shopping.length}</Button>
               </div>
             </div>
             <form onSubmit={handleCommand} className="mt-5 flex flex-col gap-2 sm:flex-row">
@@ -165,16 +193,28 @@ export default function HomePage() {
           {active === "Блюда" && <DishesView state={state} setState={setState} dishMap={dishMap} onBan={(dish) => commit(banDish(state, dish.id), `${dish.name}: скрыто из предложений.`)} onRecipeToMenu={(recipe) => commit(addRecipeToNextMenu(state, recipe), `${recipe.title}: добавлено в меню на завтра.`)} onRecipeToShopping={(recipe) => commit(addRecipeToShopping(state, recipe), `${recipe.title}: ингредиенты добавлены в покупки.`)} />}
           {active === "Семья" && <FamilyView state={state} setState={setState} onRebuild={() => regenerate("balanced")} />}
           {active === "Кухня" && <KitchenView state={state} dishMap={dishMap} commit={commit} />}
-          {active === "Остатки" && <LeftoversView state={state} />}
-          {active === "Морозилка" && <FreezerView state={state} />}
+          {active === "Остатки" && <LeftoversView state={state} commit={commit} />}
+          {active === "Морозилка" && <FreezerView state={state} commit={commit} />}
           {active === "Запасы" && <InventoryView state={state} setState={setState} commit={commit} />}
           {active === "Покупки" && <ShoppingView state={state} setState={setState} commit={commit} manualProduct={manualProduct} setManualProduct={setManualProduct} />}
           {active === "Настройки" && <SettingsView state={state} reset={() => commit(seededState(), "Демо-данные восстановлены.")} />}
         </section>
       </div>
 
-      <nav className="fixed inset-x-0 bottom-0 z-20 grid grid-cols-5 gap-1 border-t border-border bg-[#FFFDF8]/95 p-2 backdrop-blur lg:hidden">
-        {sections.slice(0, 10).map(([name, Icon]) => <button key={name} onClick={() => setActive(name)} className={`flex min-h-12 flex-col items-center justify-center rounded-xl text-[11px] font-bold ${active === name ? "bg-primary text-white" : "text-[#40504A]"}`}><Icon size={17} /><span className="max-w-full truncate">{name}</span></button>)}
+      {moreOpen && <div className="fixed inset-0 z-30 bg-[#2f2a24]/30 lg:hidden" onClick={() => setMoreOpen(false)}>
+        <section className="absolute inset-x-0 bottom-[72px] rounded-t-3xl border border-[#ead7bd] bg-[#fffdf6] p-4 shadow-[0_-16px_40px_rgba(47,42,36,0.15)]" onClick={(event) => event.stopPropagation()}>
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="text-lg font-black">Еще</h2>
+            <button className="grid size-10 place-items-center rounded-xl bg-white" aria-label="Закрыть" onClick={() => setMoreOpen(false)}><X size={18} /></button>
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            {mobileMoreSections.map(([name, Icon]) => <button key={name} onClick={() => { setActive(name); setMoreOpen(false); }} className={`flex min-h-20 flex-col items-center justify-center gap-2 rounded-xl text-xs font-bold ${active === name ? "bg-[#fff0dc] text-primary" : "bg-white text-[#40504A]"}`}><Icon size={21} /><span>{name}</span></button>)}
+          </div>
+        </section>
+      </div>}
+      <nav className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 gap-1 border-t border-border bg-[#FFFDF8]/98 px-2 pb-2 pt-1 backdrop-blur lg:hidden">
+        {mobilePrimarySections.map(([name, Icon]) => <button key={name} onClick={() => { setActive(name); setMoreOpen(false); }} className={`flex min-h-14 flex-col items-center justify-center gap-1 rounded-xl text-[11px] font-bold ${active === name && !moreOpen ? "text-primary" : "text-[#40504A]"}`}><Icon size={19} /><span>{name}</span></button>)}
+        <button onClick={() => setMoreOpen(!moreOpen)} className={`flex min-h-14 flex-col items-center justify-center gap-1 rounded-xl text-[11px] font-bold ${moreOpen || mobileMoreSections.some(([name]) => active === name) ? "text-primary" : "text-[#40504A]"}`}><MoreHorizontal size={19} /><span>Еще</span></button>
       </nav>
       {replaceRequest && <ReplaceDialog state={state} request={replaceRequest} onClose={() => setReplaceRequest(null)} onPick={(dishId) => { commit(replaceComponentWithDish(state, replaceRequest.meal.id, replaceRequest.slot, dishId), `Заменили ${slotLabels[replaceRequest.slot]} вручную.`); setReplaceRequest(null); }} onAuto={() => { commit(replaceComponent(state, replaceRequest.meal.id, replaceRequest.slot), `Подобрали замену для ${slotLabels[replaceRequest.slot]}.`); setReplaceRequest(null); }} />}
     </main>
@@ -184,7 +224,11 @@ export default function HomePage() {
 function TodayView(props: { meals: MealPlan[]; shopping: ShoppingItem[]; dishMap: Map<string, DishComponent>; onOpenShopping: () => void; onReplace: (meal: MealPlan, slot: MealComponent["slot"]) => void; onRemove: (meal: MealPlan, slot: MealComponent["slot"]) => void; onMove: (meal: MealPlan) => void; onRepeat: (meal: MealPlan) => void; onShop: (meal: MealPlan) => void; onBan: (dish: DishComponent) => void; onCook: (meal: MealPlan) => void; onQuick: (label: string) => void; }) {
   return <div className="grid gap-5 xl:grid-cols-[1fr_360px]">
     <div className="space-y-5">
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{quick.map((label) => <Button key={label} variant="soft" className="justify-start" onClick={() => props.onQuick(label)}>{label}</Button>)}</div>
+      <details className="rounded-xl border border-[#ead7bd] bg-[#fffdf6] p-3 xl:hidden">
+        <summary className="cursor-pointer text-sm font-bold text-[#40504A]">Быстро изменить меню</summary>
+        <div className="mt-3 grid grid-cols-2 gap-2">{quick.map((label) => <Button key={label} variant="outline" className="justify-start px-3" onClick={() => props.onQuick(label)}>{label}</Button>)}</div>
+      </details>
+      <div className="hidden gap-3 xl:grid xl:grid-cols-4">{quick.map((label) => <Button key={label} variant="soft" className="justify-start" onClick={() => props.onQuick(label)}>{label}</Button>)}</div>
       {props.meals.map((meal) => <MealCard key={meal.id} meal={meal} {...props} />)}
     </div>
     <div className="space-y-5">
@@ -198,22 +242,20 @@ function TodayView(props: { meals: MealPlan[]; shopping: ShoppingItem[]; dishMap
 function DishVisual({ dish, compact = false }: { dish: DishComponent; compact?: boolean }) {
   const tone = dish.role === "main" || dish.role === "freezer_item" ? "from-[#fff0d9] via-[#fffaf2] to-[#edf7ed]" : dish.role === "soup" ? "from-[#ffe8d7] via-[#fffaf2] to-[#fff3d6]" : dish.role === "salad" || dish.role === "kids_vegetables" ? "from-[#edf7ed] via-[#fffdf6] to-[#fff3d6]" : "from-[#fff3d6] via-[#fffdf6] to-[#edf7ed]";
   const ingredients = dish.ingredients.map((item) => item.name).slice(0, compact ? 2 : 4).join(" · ");
-  return <div className={`relative grid shrink-0 place-items-center overflow-hidden rounded-2xl border border-[#ead7bd] bg-gradient-to-br ${tone} p-3 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] ${compact ? "h-20 w-24" : "h-44 w-full"}`}>
-    <div className="absolute -right-5 -top-5 size-20 rounded-full bg-[#f47b58]/15" />
-    <div className="absolute -bottom-6 -left-6 size-24 rounded-full bg-[#4f7c5d]/10" />
+  return <div className={`relative grid shrink-0 place-items-center overflow-hidden rounded-2xl border border-[#ead7bd] bg-gradient-to-br ${tone} p-3 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] ${compact ? "size-14" : "h-44 w-full"}`}>
     <div className="relative space-y-1">
-      <ChefHat className="mx-auto size-5 text-[#f47b58]" />
-      <p className={`${compact ? "text-xs" : "text-base"} font-black leading-tight text-[#263238]`}>{dish.name}</p>
-      {!compact && <p className="text-xs font-semibold text-[#5f6b66]">{ingredients}</p>}
+      <ChefHat className={`mx-auto text-[#f47b58] ${compact ? "size-6" : "size-5"}`} />
+      {!compact && <><p className="text-base font-black leading-tight text-[#263238]">{dish.name}</p><p className="text-xs font-semibold text-[#5f6b66]">{ingredients}</p></>}
     </div>
   </div>;
 }
 
 function MealCard({ meal, dishMap, onReplace, onRemove, onMove, onRepeat, onShop, onBan, onCook }: { meal: MealPlan; dishMap: Map<string, DishComponent>; onReplace: (meal: MealPlan, slot: MealComponent["slot"]) => void; onRemove: (meal: MealPlan, slot: MealComponent["slot"]) => void; onMove: (meal: MealPlan) => void; onRepeat: (meal: MealPlan) => void; onShop: (meal: MealPlan) => void; onBan: (dish: DishComponent) => void; onCook: (meal: MealPlan) => void; }) {
+  const [editing, setEditing] = useState(false);
   return <Card>
     <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-      <div><CardTitle>{mealLabel(meal.kind)} · {new Date(meal.date).toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}</CardTitle><p className="text-sm text-muted-foreground">{meal.notes}</p></div>
-      <Button onClick={() => onCook(meal)}><ChefHat size={17} />Готовлю сейчас</Button>
+      <div><CardTitle>{mealLabel(meal.kind)} · {new Date(meal.date).toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}</CardTitle><p className="hidden text-sm text-muted-foreground sm:block">{meal.notes}</p></div>
+      <div className="flex gap-2"><Button onClick={() => onCook(meal)}><ChefHat size={17} />Готовлю</Button><Button variant="outline" onClick={() => setEditing(!editing)}>{editing ? "Готово" : "Изменить"}</Button></div>
     </CardHeader>
     <CardContent className="space-y-3">
       {meal.components.map((component) => {
@@ -225,11 +267,11 @@ function MealCard({ meal, dishMap, onReplace, onRemove, onMove, onRepeat, onShop
               <DishVisual dish={dish} compact />
               <div><p className="text-xs font-bold uppercase tracking-wide text-[#5F6B66]">{slotLabels[component.slot]}</p><p className="text-lg font-black">{dish.name}</p><p className="text-sm text-muted-foreground">{dish.effort === "easy" ? "быстро" : dish.effort === "weekend" ? "лучше на выходные" : "обычно"} · {dish.cost === "low" ? "недорого" : "средняя цена"}</p></div>
             </div>
-            <div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" onClick={() => onReplace(meal, component.slot)}>Заменить</Button><Button variant="ghost" size="sm" onClick={() => onRemove(meal, component.slot)}>Убрать</Button><Button variant="ghost" size="sm" onClick={() => onBan(dish)}>Не предлагать пока</Button></div>
+            {editing && <div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" onClick={() => onReplace(meal, component.slot)}>Заменить</Button><Button variant="ghost" size="sm" onClick={() => onRemove(meal, component.slot)}>Убрать</Button><Button variant="ghost" size="sm" onClick={() => onBan(dish)}>Не предлагать</Button></div>}
           </div>
         </div>;
       })}
-      <div className="flex flex-wrap gap-2 pt-1"><Button variant="outline" onClick={() => onMove(meal)}>Перенести</Button><Button variant="outline" onClick={() => onRepeat(meal)}>Повторить блюдо</Button><Button variant="outline" onClick={() => onShop(meal)}>Добавить в покупки</Button></div>
+      {editing && <div className="flex flex-wrap gap-2 pt-1"><Button variant="outline" onClick={() => onMove(meal)}>Перенести</Button><Button variant="outline" onClick={() => onRepeat(meal)}>Повторить</Button><Button variant="outline" onClick={() => onShop(meal)}>В покупки</Button></div>}
     </CardContent>
   </Card>;
 }
@@ -755,15 +797,219 @@ function FamilyView({ state, setState, onRebuild }: { state: AppState; setState:
   </div>;
 }
 
-function KitchenView({ state, dishMap, commit }: { state: AppState; dishMap: Map<string, DishComponent>; commit: (next: AppState, message: string) => void }) {
-  const session = state.cooking;
-  const meal = session ? state.meals.find((item) => item.id === session.mealId) : state.meals[0];
-  const dishes = meal?.components.map((component) => dishMap.get(component.dishId)).filter(Boolean) as DishComponent[] | undefined;
-  return <div className="grid gap-5 xl:grid-cols-[1fr_380px]"><Card><CardHeader><CardTitle>Готовлю сейчас</CardTitle><p className="text-sm text-muted-foreground">Ингредиенты, шаги, отметки и итог после готовки.</p></CardHeader><CardContent className="space-y-4">{dishes?.map((dish) => <div key={dish.id} className="rounded-2xl bg-white p-4"><h3 className="font-black">{dish.name}</h3><p className="mt-2 text-sm text-muted-foreground">Ингредиенты: {dish.ingredients.map((item) => `${item.name} ${item.amount} ${item.unit}`).join(", ")}</p>{dish.steps?.map((step, index) => <label key={step} className="mt-3 flex items-center gap-3 rounded-xl border border-border p-3"><input type="checkbox" checked={session?.doneSteps.includes(index) ?? false} onChange={() => session && commit({ ...state, cooking: { ...session, doneSteps: session.doneSteps.includes(index) ? session.doneSteps.filter((item) => item !== index) : [...session.doneSteps, index] } }, "Шаг обновлен.")} />{step}</label>)}</div>)}</CardContent></Card><Card><CardHeader><CardTitle>После готовки</CardTitle></CardHeader><CardContent className="space-y-3"><p className="rounded-xl bg-[#FFF3D6] p-3 text-sm">Кто ел, понравилось ли и что осталось — пока сохраняем как заметку сессии.</p><Button variant="soft" onClick={() => meal && commit({ ...state, leftovers: [...state.leftovers, { id: `left-${Date.now()}`, name: `остатки: ${meal.title}`, amount: "на 1 порцию", cookedAt: meal.date, useBy: meal.date, transformInto: ["Запеканка", "Суп", "Зразы"] }] }, "Остатки после готовки добавлены.")}>Записать остатки</Button><Button variant="outline">Таймер 10 минут</Button></CardContent></Card></div>;
+const leftoverAmounts: Leftover["amount"][] = ["мало", "на 1 порцию", "на 2 порции", "много"];
+
+function dateAfter(days: number) {
+  const date = new Date(startOfToday());
+  date.setDate(date.getDate() + days);
+  return date.toISOString().slice(0, 10);
 }
 
-function LeftoversView({ state }: { state: AppState }) { return <div className="grid gap-4 md:grid-cols-2">{state.leftovers.map((item) => <Card key={item.id}><CardHeader><CardTitle>{item.name}</CardTitle></CardHeader><CardContent><p>{item.amount}</p><p className="text-sm text-muted-foreground">Готовили {item.cookedAt}, использовать до {item.useBy}</p><p className="mt-3 rounded-xl bg-[#FFF3D6] p-3 text-sm">Во что превратить: {item.transformInto.join(", ")}</p></CardContent></Card>)}</div>; }
-function FreezerView({ state }: { state: AppState }) { return <div className="grid gap-4 md:grid-cols-2">{state.freezer.map((item) => <Card key={item.id}><CardHeader><CardTitle>{item.name}</CardTitle></CardHeader><CardContent><p>{item.amount}</p><p className="text-sm text-muted-foreground">Заморожено {item.frozenAt}, использовать до {item.useBy}</p><p className="mt-3 rounded-xl bg-[#EAF4EC] p-3 text-sm">Подать с: {item.serveWith.join(", ")}</p></CardContent></Card>)}</div>; }
+function KitchenView({ state, dishMap, commit }: { state: AppState; dishMap: Map<string, DishComponent>; commit: (next: AppState, message: string) => void }) {
+  const session = state.cooking;
+  const meal = session ? state.meals.find((item) => item.id === session.mealId) : undefined;
+  const dishes = meal?.components.map((component) => dishMap.get(component.dishId)).filter(Boolean) as DishComponent[] | undefined;
+  const [amount, setAmount] = useState<Leftover["amount"]>("на 1 порцию");
+  const [destination, setDestination] = useState<MealFeedback["storedAs"]>("fridge");
+  const [note, setNote] = useState("");
+  const feedback = state.feedback.slice(0, 3);
+
+  function updateSession(patch: Partial<CookingSession>, message: string) {
+    if (!session) return;
+    commit({ ...state, cooking: { ...session, ...patch } }, message);
+  }
+
+  function finishCooking() {
+    if (!session || !meal || !dishes) return;
+    const preparedName = dishes.map((dish) => dish.name).join(" + ");
+    const feedbackId = `feedback-${meal.id}-${state.feedback.length + 1}`;
+    const result: MealFeedback = {
+      id: feedbackId,
+      mealId: meal.id,
+      mealDate: meal.date,
+      eaterIds: session.eaters,
+      liked: session.liked ?? "mixed",
+      leftoversNote: note.trim() || undefined,
+      storedAs: destination,
+    };
+    const next: AppState = { ...state, feedback: [result, ...state.feedback], cooking: undefined };
+
+    if (destination === "fridge") {
+      const leftover: Leftover = {
+        id: `left-${feedbackId}`,
+        name: preparedName,
+        amount,
+        cookedAt: meal.date,
+        useBy: dateAfter(2),
+        transformInto: ["Разогреть на обед", "Добавить к гарниру"],
+      };
+      next.leftovers = [leftover, ...next.leftovers];
+    }
+    if (destination === "freezer") {
+      const frozen: FreezerItem = {
+        id: `fr-${feedbackId}`,
+        name: preparedName,
+        amount,
+        frozenAt: meal.date,
+        useBy: dateAfter(30),
+        serveWith: ["Разогреть для быстрого ужина"],
+      };
+      next.freezer = [frozen, ...next.freezer];
+    }
+    commit(next, destination === "none" ? "Готовку завершили, отзыв сохранен." : "Готовку завершили, остатки сохранены.");
+  }
+
+  if (!session || !meal) {
+    return <div className="grid gap-5 xl:grid-cols-[1fr_380px]">
+      <Card><CardHeader><CardTitle>Готовлю сейчас</CardTitle></CardHeader><CardContent><p className="text-muted-foreground">Откройте прием пищи на экране “Сегодня” и нажмите “Готовлю сейчас”.</p></CardContent></Card>
+      <CookingHistory feedback={feedback} family={state.family} />
+    </div>;
+  }
+
+  return <div className="grid gap-5 xl:grid-cols-[1fr_380px]">
+    <Card>
+      <CardHeader><CardTitle>Готовлю сейчас</CardTitle><p className="text-sm text-muted-foreground">Ингредиенты, шаги, отметки и итог после готовки.</p></CardHeader>
+      <CardContent className="space-y-4">
+        {dishes?.map((dish) => <div key={dish.id} className="rounded-2xl bg-white p-4">
+          <h3 className="font-black">{dish.name}</h3>
+          <p className="mt-2 text-sm text-muted-foreground">Ингредиенты: {dish.ingredients.map((item) => `${item.name} ${item.amount} ${item.unit}`).join(", ")}</p>
+          {dish.steps?.map((step, index) => <label key={step} className="mt-3 flex items-center gap-3 rounded-xl border border-border p-3"><input type="checkbox" checked={session.doneSteps.includes(index)} onChange={() => updateSession({ doneSteps: session.doneSteps.includes(index) ? session.doneSteps.filter((item) => item !== index) : [...session.doneSteps, index] }, "Шаг обновлен.")} />{step}</label>)}
+        </div>)}
+      </CardContent>
+    </Card>
+    <div className="space-y-4">
+      <Card>
+        <CardHeader><CardTitle>После готовки</CardTitle></CardHeader>
+        <CardContent className="space-y-4">
+          <section>
+            <p className="mb-2 text-sm font-bold">Кто ел</p>
+            <div className="flex flex-wrap gap-2">{state.family.map((member) => <Button key={member.id} variant={session.eaters.includes(member.id) ? "soft" : "outline"} size="sm" onClick={() => updateSession({ eaters: session.eaters.includes(member.id) ? session.eaters.filter((id) => id !== member.id) : [...session.eaters, member.id] }, "Участники приема пищи обновлены.")}>{member.name}</Button>)}</div>
+          </section>
+          <section>
+            <p className="mb-2 text-sm font-bold">Понравилось?</p>
+            <div className="grid grid-cols-3 gap-2">
+              {([["yes", "Да"], ["mixed", "Нормально"], ["no", "Нет"]] as const).map(([value, label]) => <Button key={value} variant={session.liked === value ? "soft" : "outline"} size="sm" onClick={() => updateSession({ liked: value }, "Оценка блюда сохранена.")}>{label}</Button>)}
+            </div>
+          </section>
+          <Textarea value={note} onChange={(event) => setNote(event.target.value)} placeholder="Что запомнить: дети не ели лук, в следующий раз меньше соли..." />
+          <div className="grid gap-2 sm:grid-cols-2">
+            <select className="min-h-11 rounded-xl border border-input bg-white px-3 text-sm font-semibold" value={amount} onChange={(event) => setAmount(event.target.value as Leftover["amount"])}>
+              {leftoverAmounts.map((item) => <option key={item} value={item}>{item}</option>)}
+            </select>
+            <select className="min-h-11 rounded-xl border border-input bg-white px-3 text-sm font-semibold" value={destination} onChange={(event) => setDestination(event.target.value as MealFeedback["storedAs"])}>
+              <option value="fridge">В холодильник</option>
+              <option value="freezer">В морозилку</option>
+              <option value="none">Ничего не осталось</option>
+            </select>
+          </div>
+          <Button className="w-full" onClick={finishCooking}>Завершить готовку</Button>
+        </CardContent>
+      </Card>
+      <CookingHistory feedback={feedback} family={state.family} />
+    </div>
+  </div>;
+}
+
+function CookingHistory({ feedback, family }: { feedback: MealFeedback[]; family: FamilyMember[] }) {
+  return <Card>
+    <CardHeader><CardTitle>Последние отзывы</CardTitle></CardHeader>
+    <CardContent className="space-y-2">
+      {feedback.length === 0 && <p className="text-sm text-muted-foreground">После первой готовки здесь появится история.</p>}
+      {feedback.map((item) => <div key={item.id} className="rounded-xl border border-border bg-white p-3 text-sm">
+        <p className="font-bold">{item.mealDate} · {item.liked === "yes" ? "понравилось" : item.liked === "no" ? "не зашло" : "нормально"}</p>
+        <p className="text-muted-foreground">{family.filter((member) => item.eaterIds.includes(member.id)).map((member) => member.name).join(", ") || "Не указано, кто ел"}</p>
+      </div>)}
+    </CardContent>
+  </Card>;
+}
+
+function LeftoversView({ state, commit }: { state: AppState; commit: (next: AppState, message: string) => void }) {
+  const [name, setName] = useState("");
+  const [amount, setAmount] = useState<Leftover["amount"]>("на 1 порцию");
+  const [useBy, setUseBy] = useState(dateAfter(2));
+  const [ideas, setIdeas] = useState("Разогреть на обед");
+
+  function addLeftover(event: FormEvent) {
+    event.preventDefault();
+    if (!name.trim()) return;
+    const leftover: Leftover = { id: `left-manual-${Date.now()}`, name: name.trim(), amount, cookedAt: dateAfter(0), useBy, transformInto: textToList(ideas) };
+    commit({ ...state, leftovers: [leftover, ...state.leftovers] }, `${leftover.name}: добавили в остатки.`);
+    setName("");
+  }
+
+  function moveToFreezer(item: Leftover) {
+    const frozen: FreezerItem = { id: `fr-from-${item.id}`, name: item.name, amount: item.amount, frozenAt: dateAfter(0), useBy: dateAfter(30), serveWith: item.transformInto };
+    commit({ ...state, leftovers: state.leftovers.filter((entry) => entry.id !== item.id), freezer: [frozen, ...state.freezer] }, `${item.name}: убрали в морозилку.`);
+  }
+
+  return <div className="space-y-4">
+    <Card><CardHeader><CardTitle>Остатки в холодильнике</CardTitle></CardHeader><CardContent>
+      <form className="grid gap-2 lg:grid-cols-[1fr_150px_170px_1fr_auto]" onSubmit={addLeftover}>
+        <Input value={name} onChange={(event) => setName(event.target.value)} placeholder="Что осталось" />
+        <select className="min-h-11 rounded-xl border border-input bg-white px-3 text-sm font-semibold" value={amount} onChange={(event) => setAmount(event.target.value as Leftover["amount"])}>
+          {leftoverAmounts.map((item) => <option key={item} value={item}>{item}</option>)}
+        </select>
+        <Input type="date" value={useBy} onChange={(event) => setUseBy(event.target.value)} />
+        <Input value={ideas} onChange={(event) => setIdeas(event.target.value)} placeholder="Во что превратить" />
+        <Button type="submit">Добавить</Button>
+      </form>
+    </CardContent></Card>
+    <div className="grid gap-4 md:grid-cols-2">
+      {state.leftovers.map((item) => <Card key={item.id}><CardHeader><CardTitle>{item.name}</CardTitle></CardHeader><CardContent className="space-y-3">
+        <p className="font-bold">{item.amount}</p>
+        <p className="text-sm text-muted-foreground">Готовили {item.cookedAt}, использовать до {item.useBy}</p>
+        <p className="rounded-xl bg-[#FFF3D6] p-3 text-sm">Во что превратить: {item.transformInto.join(", ") || "решить позже"}</p>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="soft" size="sm" onClick={() => moveToFreezer(item)}>В морозилку</Button>
+          <Button variant="danger" size="sm" onClick={() => commit({ ...state, leftovers: state.leftovers.filter((entry) => entry.id !== item.id) }, `${item.name}: использовали.`)}>Использовали</Button>
+        </div>
+      </CardContent></Card>)}
+    </div>
+  </div>;
+}
+
+function FreezerView({ state, commit }: { state: AppState; commit: (next: AppState, message: string) => void }) {
+  const [name, setName] = useState("");
+  const [amount, setAmount] = useState("1 порция");
+  const [useBy, setUseBy] = useState(dateAfter(30));
+  const [serveWith, setServeWith] = useState("Разогреть на ужин");
+
+  function addFrozen(event: FormEvent) {
+    event.preventDefault();
+    if (!name.trim()) return;
+    const frozen: FreezerItem = { id: `fr-manual-${Date.now()}`, name: name.trim(), amount: amount.trim() || "1 порция", frozenAt: dateAfter(0), useBy, serveWith: textToList(serveWith) };
+    commit({ ...state, freezer: [frozen, ...state.freezer] }, `${frozen.name}: добавили в морозилку.`);
+    setName("");
+  }
+
+  function thaw(item: FreezerItem) {
+    const leftover: Leftover = { id: `left-from-${item.id}`, name: item.name, amount: "на 1 порцию", cookedAt: dateAfter(0), useBy: dateAfter(1), transformInto: item.serveWith };
+    commit({ ...state, freezer: state.freezer.filter((entry) => entry.id !== item.id), leftovers: [leftover, ...state.leftovers] }, `${item.name}: достали размораживаться.`);
+  }
+
+  return <div className="space-y-4">
+    <Card><CardHeader><CardTitle>Морозилка</CardTitle></CardHeader><CardContent>
+      <form className="grid gap-2 lg:grid-cols-[1fr_120px_170px_1fr_auto]" onSubmit={addFrozen}>
+        <Input value={name} onChange={(event) => setName(event.target.value)} placeholder="Что заморозили" />
+        <Input value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="Количество" />
+        <Input type="date" value={useBy} onChange={(event) => setUseBy(event.target.value)} />
+        <Input value={serveWith} onChange={(event) => setServeWith(event.target.value)} placeholder="Как использовать" />
+        <Button type="submit">Добавить</Button>
+      </form>
+    </CardContent></Card>
+    <div className="grid gap-4 md:grid-cols-2">
+      {state.freezer.map((item) => <Card key={item.id}><CardHeader><CardTitle>{item.name}</CardTitle></CardHeader><CardContent className="space-y-3">
+        <p className="font-bold">{item.amount}</p>
+        <p className="text-sm text-muted-foreground">Заморожено {item.frozenAt}, использовать до {item.useBy}</p>
+        <p className="rounded-xl bg-[#EAF4EC] p-3 text-sm">Подать с: {item.serveWith.join(", ") || "решить позже"}</p>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="soft" size="sm" onClick={() => thaw(item)}>Разморозить</Button>
+          <Button variant="danger" size="sm" onClick={() => commit({ ...state, freezer: state.freezer.filter((entry) => entry.id !== item.id) }, `${item.name}: убрали из морозилки.`)}>Удалить</Button>
+        </div>
+      </CardContent></Card>)}
+    </div>
+  </div>;
+}
 function InventoryView({ state, setState, commit }: { state: AppState; setState: (state: AppState) => void; commit: (next: AppState, message: string) => void }) {
   const [product, setProduct] = useState("");
   const [amount, setAmount] = useState("1");
