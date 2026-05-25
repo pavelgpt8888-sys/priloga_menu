@@ -1,16 +1,17 @@
 "use client";
 
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore, type FormEvent } from "react";
 import { CalendarDays, Camera, ChefHat, Heart, Home, IceCreamBowl, ListChecks, MoreHorizontal, Plus, RotateCcw, Settings, ShoppingBasket, Snowflake, Soup, Sparkles, Star, Upload, Users, Warehouse, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { initialState } from "@/lib/demo-data";
-import { addManualShoppingItem, addRecipeToNextMenu, addRecipeToShopping, applyQuickScenario, banDish, buildShoppingList, byId, generateWeek, mealLabel, moveCheckedShoppingToInventory, moveMealToDate, parseCommand, planRecipeForMeal, removeComponent, replaceComponent, replacementOptions, replaceComponentWithDish, startOfToday } from "@/lib/planner";
+import { addManualShoppingItem, addRecipeToNextMenu, addRecipeToShopping, applyQuickScenario, banDish, buildShoppingList, byId, estimatedPlanCost, generateWeek, mealLabel, moveCheckedShoppingToInventory, moveMealToDate, parseCommand, planDishForDate, planRecipeForMeal, removeComponent, replaceComponent, replacementOptions, replaceComponentWithDish, startOfToday, suggestDishesFromPantry, type DishSuggestion } from "@/lib/planner";
 import type { AppState, CookingSession, DishComponent, FamilyMember, FreezerItem, IngredientNeed, InventoryItem, Leftover, MealComponent, MealFeedback, MealKind, MealPlan, RecipeEntry, ShoppingCategory, ShoppingItem, StoragePlace } from "@/lib/types";
 
 const storageKey = "family-meal-planner-state-v1";
+const storageEvent = "family-meal-planner-change";
 const sections = [
   ["Сегодня", Home], ["Меню", CalendarDays], ["Блюда", Soup], ["Семья", Users], ["Кухня", ChefHat],
   ["Остатки", IceCreamBowl], ["Морозилка", Snowflake], ["Запасы", Warehouse], ["Покупки", ShoppingBasket], ["Настройки", Settings],
@@ -36,7 +37,7 @@ function hydrateState(value: AppState): AppState {
   const recipeIds = new Set(usableRecipes.map((recipe) => recipe.id));
   const recipes = [...usableRecipes, ...initialState.recipes.filter((recipe) => !recipeIds.has(recipe.id))];
 
-  return {
+  const hydrated: AppState = {
     ...initialState,
     ...value,
     family: value.family?.length ? value.family : initialState.family,
@@ -44,25 +45,57 @@ function hydrateState(value: AppState): AppState {
     inventory: value.inventory ?? initialState.inventory,
     leftovers: value.leftovers ?? initialState.leftovers,
     freezer: value.freezer ?? initialState.freezer,
-    meals: value.meals?.length ? value.meals : generateWeek(initialState),
+    meals: value.meals?.length ? value.meals : [],
     shopping: value.shopping ?? [],
     recipes,
     bannedDishIds: value.bannedDishIds ?? [],
     feedback: value.feedback ?? [],
   };
+  const generatedMeals = generateWeek(hydrated);
+  const savedMeals = hydrated.meals.length ? hydrated.meals : generatedMeals;
+  const missingLunches = generatedMeals.filter((meal) =>
+    meal.kind === "lunch" && !savedMeals.some((saved) => saved.date === meal.date && saved.kind === "lunch"),
+  );
+  const order: MealKind[] = ["breakfast", "lunch", "dinner", "snack"];
+  const meals = [...savedMeals, ...missingLunches].sort((first, second) =>
+    first.date.localeCompare(second.date) || order.indexOf(first.kind) - order.indexOf(second.kind),
+  );
+  const manualShopping = hydrated.shopping.filter((item) => item.manuallyAdded);
+  const shopping = missingLunches.length
+    ? [...buildShoppingList({ ...hydrated, meals }), ...manualShopping]
+    : hydrated.shopping.length ? hydrated.shopping : buildShoppingList({ ...hydrated, meals });
+  return { ...hydrated, meals, shopping };
+}
+
+function subscribeToStorage(onStoreChange: () => void) {
+  window.addEventListener(storageEvent, onStoreChange);
+  window.addEventListener("storage", onStoreChange);
+  return () => {
+    window.removeEventListener(storageEvent, onStoreChange);
+    window.removeEventListener("storage", onStoreChange);
+  };
+}
+
+function readStorageSnapshot() {
+  return localStorage.getItem(storageKey) ?? "";
+}
+
+function subscribeToBrowserReady() {
+  return () => undefined;
 }
 
 export default function HomePage() {
-  const [state, setState] = useState<AppState>(() => {
-    if (typeof window === "undefined") return seededState();
-    const raw = window.localStorage.getItem(storageKey);
-    if (!raw) return seededState();
+  const storedSnapshot = useSyncExternalStore(subscribeToStorage, readStorageSnapshot, () => "");
+  const browserReady = useSyncExternalStore(subscribeToBrowserReady, () => true, () => false);
+  const activeSnapshot = browserReady ? storedSnapshot : "";
+  const state = useMemo(() => {
+    if (!activeSnapshot) return seededState();
     try {
-      return hydrateState(JSON.parse(raw) as AppState);
+      return hydrateState(JSON.parse(activeSnapshot) as AppState);
     } catch {
       return seededState();
     }
-  });
+  }, [activeSnapshot]);
   const [active, setActive] = useState<(typeof sections)[number][0]>("Сегодня");
   const [toast, setToast] = useState("");
   const [undo, setUndo] = useState<AppState | null>(null);
@@ -76,8 +109,13 @@ export default function HomePage() {
   const todayMeals = state.meals.filter((meal) => meal.date === today);
 
   useEffect(() => {
-    localStorage.setItem(storageKey, JSON.stringify(state));
-  }, [state]);
+    window.scrollTo({ top: 0, behavior: "auto" });
+  }, [active]);
+
+  function setState(next: AppState) {
+    localStorage.setItem(storageKey, JSON.stringify(next));
+    window.dispatchEvent(new Event(storageEvent));
+  }
 
   function commit(next: AppState, message: string) {
     setUndo(state);
@@ -185,7 +223,7 @@ export default function HomePage() {
 
           {toast && <div className="flex flex-col gap-3 rounded-2xl border border-[#b9d6b8] bg-[#edf7ed] p-4 text-sm font-semibold text-[#285f3b] shadow-[0_12px_30px_rgba(63,125,82,0.10)] sm:flex-row sm:items-center sm:justify-between"><span>{toast}</span>{undo && <Button variant="outline" size="sm" onClick={() => { setState(undo); setUndo(null); setToast("Отменено. Вернули предыдущее состояние."); }}><RotateCcw size={16} />Отменить</Button>}</div>}
 
-          {active === "Сегодня" && <TodayView meals={todayMeals} shopping={state.shopping} dishMap={dishMap} onOpenShopping={() => setActive("Покупки")} onReplace={(meal, slot) => setReplaceRequest({ meal, slot })} onRemove={(meal, slot) => commit(removeComponent(state, meal.id, slot), `Убрали ${slotLabels[slot]}.`)} onMove={moveMeal} onRepeat={repeatMeal} onShop={addMealToShopping} onBan={(dish) => commit(banDish(state, dish.id), `${dish.name}: пока не предлагаем.`)} onCook={startCooking} onQuick={handleQuick} />}
+          {active === "Сегодня" && <TodayView state={state} meals={todayMeals} shopping={state.shopping} dishMap={dishMap} onOpenShopping={() => setActive("Покупки")} onReplace={(meal, slot) => setReplaceRequest({ meal, slot })} onRemove={(meal, slot) => commit(removeComponent(state, meal.id, slot), `Убрали ${slotLabels[slot]}.`)} onMove={moveMeal} onRepeat={repeatMeal} onShop={addMealToShopping} onBan={(dish) => commit(banDish(state, dish.id), `${dish.name}: пока не предлагаем.`)} onCook={startCooking} onQuick={handleQuick} onPlanSuggested={(dishId, date) => commit(planDishForDate(state, dishId, date), "Подобранное блюдо поставлено на ужин, покупки пересчитаны.")} />}
           {active === "Меню" && <MenuView state={state} dishMap={dishMap} regenerate={regenerate} onReplace={(meal, slot) => setReplaceRequest({ meal, slot })} onPlanMeal={(recipe, kind, date) => {
             const planned = planRecipeForMeal(state, recipe, date, kind);
             commit(planned, `${mealLabel(kind)} на ${new Date(date).toLocaleDateString("ru-RU", { day: "numeric", month: "long" })}: ${recipe.title}.`);
@@ -197,7 +235,7 @@ export default function HomePage() {
           {active === "Морозилка" && <FreezerView state={state} commit={commit} />}
           {active === "Запасы" && <InventoryView state={state} setState={setState} commit={commit} />}
           {active === "Покупки" && <ShoppingView state={state} setState={setState} commit={commit} manualProduct={manualProduct} setManualProduct={setManualProduct} />}
-          {active === "Настройки" && <SettingsView state={state} reset={() => commit(seededState(), "Демо-данные восстановлены.")} />}
+          {active === "Настройки" && <SettingsView reset={() => commit(seededState(), "Демо-данные восстановлены.")} onNavigate={(section) => setActive(section)} />}
         </section>
       </div>
 
@@ -221,7 +259,11 @@ export default function HomePage() {
   );
 }
 
-function TodayView(props: { meals: MealPlan[]; shopping: ShoppingItem[]; dishMap: Map<string, DishComponent>; onOpenShopping: () => void; onReplace: (meal: MealPlan, slot: MealComponent["slot"]) => void; onRemove: (meal: MealPlan, slot: MealComponent["slot"]) => void; onMove: (meal: MealPlan) => void; onRepeat: (meal: MealPlan) => void; onShop: (meal: MealPlan) => void; onBan: (dish: DishComponent) => void; onCook: (meal: MealPlan) => void; onQuick: (label: string) => void; }) {
+function TodayView(props: { state: AppState; meals: MealPlan[]; shopping: ShoppingItem[]; dishMap: Map<string, DishComponent>; onOpenShopping: () => void; onReplace: (meal: MealPlan, slot: MealComponent["slot"]) => void; onRemove: (meal: MealPlan, slot: MealComponent["slot"]) => void; onMove: (meal: MealPlan) => void; onRepeat: (meal: MealPlan) => void; onShop: (meal: MealPlan) => void; onBan: (dish: DishComponent) => void; onCook: (meal: MealPlan) => void; onQuick: (label: string) => void; onPlanSuggested: (dishId: string, date: string) => void; }) {
+  const urgent = [
+    ...props.state.inventory.filter((item) => item.urgent || (item.expiresAt && item.expiresAt <= dateAfter(2))).map((item) => `${item.product}: использовать до ${item.expiresAt ?? "скорее"}`),
+    ...props.state.leftovers.filter((item) => item.useBy <= dateAfter(2)).map((item) => `${item.name}: остатки до ${item.useBy}`),
+  ].slice(0, 4);
   return <div className="grid gap-5 xl:grid-cols-[1fr_360px]">
     <div className="space-y-5">
       <details className="rounded-xl border border-[#ead7bd] bg-[#fffdf6] p-3 xl:hidden">
@@ -229,14 +271,64 @@ function TodayView(props: { meals: MealPlan[]; shopping: ShoppingItem[]; dishMap
         <div className="mt-3 grid grid-cols-2 gap-2">{quick.map((label) => <Button key={label} variant="outline" className="justify-start px-3" onClick={() => props.onQuick(label)}>{label}</Button>)}</div>
       </details>
       <div className="hidden gap-3 xl:grid xl:grid-cols-4">{quick.map((label) => <Button key={label} variant="soft" className="justify-start" onClick={() => props.onQuick(label)}>{label}</Button>)}</div>
+      <PantryAssistant state={props.state} onPlanSuggested={props.onPlanSuggested} />
       {props.meals.map((meal) => <MealCard key={meal.id} meal={meal} {...props} />)}
     </div>
     <div className="space-y-5">
-      <InfoCard title="Срочно использовать" items={["яйца до 24 мая", "огурцы сегодня-завтра", "пюре превратить в зразы"]} tone="tip" />
+      <InfoCard title="Срочно использовать" items={urgent.length ? urgent : ["Нет продуктов с близким сроком."]} tone="tip" />
       <ShoppingPreview items={props.shopping} onOpen={props.onOpenShopping} />
-      <InfoCard title="AI-фото холодильника" items={["Распознать продукты по фото", "MVP: место в интерфейсе готово", "позже: фото → подтверждение → запасы"]} tone="success" />
+      <InfoCard title="Импорт по фото" items={["Черновик рецепта доступен в разделе «Блюда»", "Фото → текст будет подключено вместе с AI", "Сейчас текст можно вставить и проверить вручную"]} tone="success" />
     </div>
   </div>;
+}
+
+function PantryAssistant({ state, onPlanSuggested }: { state: AppState; onPlanSuggested: (dishId: string, date: string) => void }) {
+  const tomorrow = new Date(startOfToday());
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const [products, setProducts] = useState("");
+  const [date, setDate] = useState(tomorrow.toISOString().slice(0, 10));
+  const [minutes, setMinutes] = useState("30");
+  const [budget, setBudget] = useState<"balanced" | "economy">("balanced");
+  const [suggestions, setSuggestions] = useState<DishSuggestion[]>([]);
+
+  function findSuggestions(event: FormEvent) {
+    event.preventDefault();
+    setSuggestions(suggestDishesFromPantry(state, products, Number(minutes), budget));
+  }
+
+  return <Card className="border-[#ffd1b3] bg-gradient-to-br from-[#fff7ea] to-[#fffdf6]">
+    <CardHeader>
+      <CardTitle>Что приготовить из того, что есть</CardTitle>
+      <p className="text-sm text-muted-foreground">Запасы и остатки уже учитываются. Допишите продукты, которые есть дома, и выберите условия.</p>
+    </CardHeader>
+    <CardContent className="space-y-3">
+      <form className="grid gap-2 sm:grid-cols-2 2xl:grid-cols-[1fr_112px_135px_145px_auto]" onSubmit={findSuggestions}>
+        <Input className="sm:col-span-2 2xl:col-span-1" value={products} onChange={(event) => setProducts(event.target.value)} placeholder="Например: курица, сыр, гречка" />
+        <select className="min-h-11 rounded-xl border border-input bg-white px-3 text-sm font-semibold" value={minutes} onChange={(event) => setMinutes(event.target.value)}>
+          <option value="30">до 30 мин</option>
+          <option value="50">до 50 мин</option>
+          <option value="90">время есть</option>
+        </select>
+        <select className="min-h-11 rounded-xl border border-input bg-white px-3 text-sm font-semibold" value={budget} onChange={(event) => setBudget(event.target.value as "balanced" | "economy")}>
+          <option value="balanced">обычно</option>
+          <option value="economy">экономно</option>
+        </select>
+        <Input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
+        <Button className="sm:col-span-2 2xl:col-span-1" type="submit"><Sparkles size={16} />Подобрать</Button>
+      </form>
+      {suggestions.length > 0 && <div className="grid gap-2 pt-2 md:grid-cols-2">
+        {suggestions.slice(0, 4).map((suggestion) => <div key={suggestion.dish.id} className="rounded-xl border border-[#ead7bd] bg-white p-3">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="font-black">{suggestion.dish.name}</p>
+              <p className="mt-1 text-xs text-muted-foreground">{suggestion.reason}</p>
+            </div>
+            <Button size="sm" variant="soft" onClick={() => onPlanSuggested(suggestion.dish.id, date)}>В меню</Button>
+          </div>
+        </div>)}
+      </div>}
+    </CardContent>
+  </Card>;
 }
 
 function DishVisual({ dish, compact = false }: { dish: DishComponent; compact?: boolean }) {
@@ -283,13 +375,18 @@ function MenuView({ state, dishMap, regenerate, onReplace, onPlanMeal, onMoveMea
   const [calendarMode, setCalendarMode] = useState<"day" | "week" | "month">("week");
   const [selectedDate, setSelectedDate] = useState(defaultPlanDate.toISOString().slice(0, 10));
   const [breakfastId, setBreakfastId] = useState(state.recipes.find((recipe) => recipe.categories.includes("завтраки"))?.id ?? state.recipes[0]?.id ?? "");
+  const [lunchId, setLunchId] = useState(state.recipes.find((recipe) => recipe.categories.includes("супы"))?.id ?? state.recipes[0]?.id ?? "");
   const [dinnerId, setDinnerId] = useState(state.recipes.find((recipe) => recipe.categories.includes("ужины"))?.id ?? state.recipes[0]?.id ?? "");
+  const [budgetLimit, setBudgetLimit] = useState("180");
   const grouped = Object.groupBy(state.meals, (meal) => meal.date);
   const selectedDayMeals = state.meals.filter((meal) => meal.date === selectedDate);
   const breakfastRecipes = state.recipes.filter((recipe) => recipe.categories.includes("завтраки") || recipe.title.toLowerCase().includes("сырник") || recipe.title.toLowerCase().includes("каша"));
+  const lunchRecipes = state.recipes.filter((recipe) => recipe.categories.includes("супы"));
   const dinnerRecipes = state.recipes.filter((recipe) => recipe.categories.includes("ужины") || recipe.categories.includes("супы") || recipe.categories.includes("мои рецепты"));
   const selectedBreakfast = state.recipes.find((recipe) => recipe.id === breakfastId) ?? breakfastRecipes[0] ?? state.recipes[0];
+  const selectedLunch = state.recipes.find((recipe) => recipe.id === lunchId) ?? lunchRecipes[0] ?? state.recipes[0];
   const selectedDinner = state.recipes.find((recipe) => recipe.id === dinnerId) ?? dinnerRecipes[0] ?? state.recipes[0];
+  const estimatedCost = estimatedPlanCost(state);
   const monthStart = new Date(startOfToday());
   monthStart.setDate(1);
   const monthDays = Array.from({ length: new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0).getDate() }, (_, index) => {
@@ -307,9 +404,9 @@ function MenuView({ state, dishMap, regenerate, onReplace, onPlanMeal, onMoveMea
       <CardHeader className="space-y-3">
         <div>
           <CardTitle>План конкретного дня</CardTitle>
-          <p className="text-sm text-muted-foreground">Выберите дату, завтрак и ужин из рецептов. После клика список покупок пересчитается.</p>
+          <p className="text-sm text-muted-foreground">Выберите дату, завтрак, обед и ужин из рецептов. После клика список покупок пересчитается.</p>
         </div>
-        <div className="grid gap-3 xl:grid-cols-[170px_1fr_1fr_auto]">
+        <div className="grid gap-3 2xl:grid-cols-[150px_1fr_1fr_1fr_auto]">
           <label className="grid gap-1 text-sm font-semibold">Дата
             <Input type="date" value={selectedDate} onChange={(event) => setSelectedDate(event.target.value)} />
           </label>
@@ -318,13 +415,19 @@ function MenuView({ state, dishMap, regenerate, onReplace, onPlanMeal, onMoveMea
               {breakfastRecipes.map((recipe) => <option key={recipe.id} value={recipe.id}>{recipe.title}</option>)}
             </select>
           </label>
+          <label className="grid gap-1 text-sm font-semibold">Обед
+            <select className="min-h-12 rounded-xl border border-input bg-white px-4 text-sm shadow-sm" value={selectedLunch?.id ?? ""} onChange={(event) => setLunchId(event.target.value)}>
+              {lunchRecipes.map((recipe) => <option key={recipe.id} value={recipe.id}>{recipe.title}</option>)}
+            </select>
+          </label>
           <label className="grid gap-1 text-sm font-semibold">Ужин
             <select className="min-h-12 rounded-xl border border-input bg-white px-4 text-sm shadow-sm" value={selectedDinner?.id ?? ""} onChange={(event) => setDinnerId(event.target.value)}>
               {dinnerRecipes.map((recipe) => <option key={recipe.id} value={recipe.id}>{recipe.title}</option>)}
             </select>
           </label>
-          <div className="flex flex-col justify-end gap-2 sm:flex-row xl:flex-col">
+          <div className="flex flex-col justify-end gap-2 sm:flex-row 2xl:flex-col">
             <Button onClick={() => selectedBreakfast && onPlanMeal(selectedBreakfast, "breakfast", selectedDate)}>Поставить завтрак</Button>
+            <Button variant="soft" onClick={() => selectedLunch && onPlanMeal(selectedLunch, "lunch", selectedDate)}>Поставить обед</Button>
             <Button variant="soft" onClick={() => selectedDinner && onPlanMeal(selectedDinner, "dinner", selectedDate)}>Поставить ужин</Button>
           </div>
         </div>
@@ -341,6 +444,21 @@ function MenuView({ state, dishMap, regenerate, onReplace, onPlanMeal, onMoveMea
           <Button variant="ghost" onClick={() => regenerate("balanced")}>Пересобрать неделю</Button>
         </div>
       </CardContent>
+    </Card>
+
+    <Card>
+      <CardHeader className="space-y-3">
+        <div>
+          <CardTitle>Экономный план недели</CardTitle>
+          <p className="text-sm text-muted-foreground">Предварительная оценка текущего меню: около {estimatedCost} BYN. Пока это уровни стоимости блюд, не цены магазинов.</p>
+        </div>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+          <label className="grid gap-1 text-sm font-semibold">Лимит, BYN
+            <Input type="number" min={20} value={budgetLimit} onChange={(event) => setBudgetLimit(event.target.value)} />
+          </label>
+          <Button variant="soft" onClick={() => regenerate(Number(budgetLimit) < estimatedCost ? "cheap" : "balanced")}>Сделать меню экономнее</Button>
+        </div>
+      </CardHeader>
     </Card>
 
     <div className="flex flex-wrap gap-2"><Button onClick={() => regenerate("balanced")}>Сгенерировать неделю</Button><Button variant="soft" onClick={() => regenerate("simple")}>Будни проще</Button><Button variant="soft" onClick={() => regenerate("leftovers")}>Использовать остатки</Button><Button variant="soft" onClick={() => regenerate("freezer")}>Взять из морозилки</Button></div>
@@ -1016,6 +1134,7 @@ function InventoryView({ state, setState, commit }: { state: AppState; setState:
   const [unit, setUnit] = useState("шт");
   const [category, setCategory] = useState<ShoppingCategory>("бакалея");
   const [place, setPlace] = useState<StoragePlace>("fridge");
+  const [expiresAt, setExpiresAt] = useState("");
   const placeLabel: Record<StoragePlace, string> = { fridge: "холодильник", freezer: "морозилка", pantry: "шкаф" };
   const update = (item: InventoryItem, patch: Partial<InventoryItem>) => setState({ ...state, inventory: state.inventory.map((entry) => entry.id === item.id ? { ...entry, ...patch } : entry) });
   const addInventory = (event: FormEvent) => {
@@ -1023,17 +1142,18 @@ function InventoryView({ state, setState, commit }: { state: AppState; setState:
     const cleanProduct = product.trim();
     if (!cleanProduct) return;
     const numericAmount = Math.max(0.1, Number(amount.replace(",", ".")) || 1);
-    const nextItem: InventoryItem = { id: `inv-manual-${Date.now()}`, product: cleanProduct, amount: numericAmount, unit: unit.trim() || "шт", category, place, source: "manual" };
+    const nextItem: InventoryItem = { id: `inv-manual-${Date.now()}`, product: cleanProduct, amount: numericAmount, unit: unit.trim() || "шт", category, place, expiresAt: expiresAt || undefined, urgent: Boolean(expiresAt && expiresAt <= dateAfter(2)), source: "manual" };
     commit({ ...state, inventory: [nextItem, ...state.inventory] }, `${cleanProduct}: добавили в запасы.`);
     setProduct("");
     setAmount("1");
+    setExpiresAt("");
   };
 
   return <div className="space-y-4">
     <Card>
       <CardHeader><CardTitle>Холодильник и запасы</CardTitle></CardHeader>
       <CardContent>
-        <form className="grid gap-2 md:grid-cols-[minmax(180px,1fr)_90px_90px_160px_150px_auto]" onSubmit={addInventory}>
+        <form className="grid gap-2 md:grid-cols-[minmax(160px,1fr)_76px_76px_145px_130px_155px_auto]" onSubmit={addInventory}>
           <Input value={product} onChange={(event) => setProduct(event.target.value)} placeholder="Продукт: молоко, яйца, рис" />
           <Input value={amount} onChange={(event) => setAmount(event.target.value)} inputMode="decimal" placeholder="Кол-во" />
           <Input value={unit} onChange={(event) => setUnit(event.target.value)} placeholder="ед." />
@@ -1043,18 +1163,24 @@ function InventoryView({ state, setState, commit }: { state: AppState; setState:
           <select className="min-h-11 rounded-xl border border-input bg-white px-3 text-sm font-semibold shadow-sm" value={place} onChange={(event) => setPlace(event.target.value as StoragePlace)}>
             {Object.entries(placeLabel).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
           </select>
+          <Input type="date" value={expiresAt} onChange={(event) => setExpiresAt(event.target.value)} aria-label="Годен до" />
           <Button type="submit">Добавить</Button>
         </form>
       </CardContent>
     </Card>
 
     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-      {state.inventory.map((item) => <Card key={item.id}>
+      {state.inventory.map((item) => {
+        const urgent = item.urgent || Boolean(item.expiresAt && item.expiresAt <= dateAfter(2));
+        return <Card key={item.id}>
         <CardHeader><CardTitle>{item.product}</CardTitle></CardHeader>
         <CardContent className="space-y-3">
           <p className="text-lg font-black">{item.amount} {item.unit}</p>
           <p className="text-sm text-muted-foreground">{item.category} · {placeLabel[item.place]}</p>
-          {item.urgent && <p className="rounded-xl bg-[#FFF3D6] p-3 text-sm font-semibold">Использовать срочно</p>}
+          <label className="grid gap-1 text-xs font-bold text-muted-foreground">Годен до
+            <Input type="date" value={item.expiresAt ?? ""} onChange={(event) => update(item, { expiresAt: event.target.value || undefined, urgent: Boolean(event.target.value && event.target.value <= dateAfter(2)) })} />
+          </label>
+          {urgent && <p className="rounded-xl bg-[#FFF3D6] p-3 text-sm font-semibold">Использовать срочно</p>}
           <div className="flex flex-wrap gap-2">
             <Button variant="ghost" size="sm" onClick={() => update(item, { amount: Math.max(0.1, Number((item.amount - 1).toFixed(1))) })}>Меньше</Button>
             <Button variant="ghost" size="sm" onClick={() => update(item, { amount: Number((item.amount + 1).toFixed(1)) })}>Больше</Button>
@@ -1062,7 +1188,8 @@ function InventoryView({ state, setState, commit }: { state: AppState; setState:
             <Button variant="danger" size="sm" onClick={() => setState({ ...state, inventory: state.inventory.filter((entry) => entry.id !== item.id) })}>Удалить</Button>
           </div>
         </CardContent>
-      </Card>)}
+      </Card>;
+      })}
     </div>
   </div>;
 }
@@ -1071,10 +1198,18 @@ function ShoppingView({ state, setState, commit, manualProduct, setManualProduct
   const grouped = Object.groupBy(state.shopping, (item) => item.category);
   const checkedCount = state.shopping.filter((item) => item.checked && !item.alreadyAtHome).length;
   const update = (item: ShoppingItem, patch: Partial<ShoppingItem>) => setState({ ...state, shopping: state.shopping.map((entry) => entry.id === item.id ? { ...entry, ...patch } : entry) });
-  return <div className="space-y-4"><Card><CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><CardTitle>Общий список покупок</CardTitle><p className="text-sm text-muted-foreground">Купленное можно сразу перенести в запасы.</p></div><Button variant="soft" disabled={!checkedCount} onClick={() => commit(moveCheckedShoppingToInventory(state), `Купленное перенесено в запасы: ${checkedCount} поз.`)}>Купленное в запасы</Button></CardHeader></Card><form className="flex gap-2" onSubmit={(event) => { event.preventDefault(); commit(addManualShoppingItem(state, manualProduct), "Добавили вручную в покупки."); setManualProduct(""); }}><Input value={manualProduct} onChange={(event) => setManualProduct(event.target.value)} placeholder="Добавить вручную: молоко, хлеб, салфетки" /><Button>Добавить</Button></form>{Object.entries(grouped).map(([category, items]) => <Card key={category}><CardHeader><CardTitle>{category}</CardTitle></CardHeader><CardContent className="space-y-2">{items?.map((item) => <div key={item.id} className="flex flex-col gap-3 rounded-xl bg-white p-3 sm:flex-row sm:items-center sm:justify-between"><label className="flex items-center gap-3 font-semibold"><input type="checkbox" checked={item.checked} onChange={(event) => update(item, { checked: event.target.checked })} />{item.product} · {item.amount} {item.unit}</label><div className="flex flex-wrap gap-2"><Button variant="ghost" size="sm" onClick={() => update(item, { alreadyAtHome: !item.alreadyAtHome })}>{item.alreadyAtHome ? "Уже есть" : "Есть дома"}</Button><Button variant="ghost" size="sm" onClick={() => update(item, { amount: Math.max(0.5, item.amount - 1) })}>Меньше</Button><Button variant="ghost" size="sm" onClick={() => update(item, { amount: item.amount + 1 })}>Больше</Button><Button variant="danger" size="sm" onClick={() => setState({ ...state, shopping: state.shopping.filter((entry) => entry.id !== item.id) })}>Удалить</Button></div></div>)}</CardContent></Card>)}</div>;
+  function rebuildFor(meals: MealPlan[], label: string) {
+    const manual = state.shopping.filter((item) => item.manuallyAdded);
+    commit({ ...state, shopping: [...buildShoppingList({ ...state, meals }), ...manual] }, `Список покупок пересчитан: ${label}.`);
+  }
+  const today = startOfToday().toISOString().slice(0, 10);
+  const weekEnd = new Date(startOfToday());
+  weekEnd.setDate(weekEnd.getDate() + 6);
+  const weekEndIso = weekEnd.toISOString().slice(0, 10);
+  return <div className="space-y-4"><Card><CardHeader className="space-y-3"><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><CardTitle>Общий список покупок</CardTitle><p className="text-sm text-muted-foreground">Как в Plan to Eat: создайте список из выбранного периода меню, а купленное перенесите в запасы.</p></div><Button variant="soft" disabled={!checkedCount} onClick={() => commit(moveCheckedShoppingToInventory(state), `Купленное перенесено в запасы: ${checkedCount} поз.`)}>Купленное в запасы</Button></div><div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" onClick={() => rebuildFor(state.meals.filter((meal) => meal.date === today), "сегодня")}>Из меню сегодня</Button><Button variant="outline" size="sm" onClick={() => rebuildFor(state.meals.filter((meal) => meal.date >= today && meal.date <= weekEndIso), "7 дней")}>Из меню на 7 дней</Button><Button variant="outline" size="sm" onClick={() => rebuildFor(state.meals, "все запланированное")}>Из всего меню</Button></div></CardHeader></Card><form className="flex gap-2" onSubmit={(event) => { event.preventDefault(); commit(addManualShoppingItem(state, manualProduct), "Добавили вручную в покупки."); setManualProduct(""); }}><Input value={manualProduct} onChange={(event) => setManualProduct(event.target.value)} placeholder="Добавить вручную: молоко, хлеб, салфетки" /><Button>Добавить</Button></form>{Object.entries(grouped).map(([category, items]) => <Card key={category}><CardHeader><CardTitle>{category}</CardTitle></CardHeader><CardContent className="space-y-2">{items?.map((item) => <div key={item.id} className="flex flex-col gap-3 rounded-xl bg-white p-3 sm:flex-row sm:items-center sm:justify-between"><label className="flex items-center gap-3 font-semibold"><input type="checkbox" checked={item.checked} onChange={(event) => update(item, { checked: event.target.checked })} />{item.product} · {item.amount} {item.unit}</label><div className="flex flex-wrap gap-2"><Button variant="ghost" size="sm" onClick={() => update(item, { alreadyAtHome: !item.alreadyAtHome })}>{item.alreadyAtHome ? "Уже есть" : "Есть дома"}</Button><Button variant="ghost" size="sm" onClick={() => update(item, { amount: Math.max(0.5, item.amount - 1) })}>Меньше</Button><Button variant="ghost" size="sm" onClick={() => update(item, { amount: item.amount + 1 })}>Больше</Button><Button variant="danger" size="sm" onClick={() => setState({ ...state, shopping: state.shopping.filter((entry) => entry.id !== item.id) })}>Удалить</Button></div></div>)}</CardContent></Card>)}</div>;
 }
 
-function SettingsView({ state, reset }: { state: AppState; reset: () => void }) { return <div className="grid gap-4 xl:grid-cols-2"><Card><CardHeader><CardTitle>Настройки MVP</CardTitle></CardHeader><CardContent className="space-y-3"><p className="text-muted-foreground">Данные хранятся локально в браузере. Supabase-поля и модели подготовлены для следующего этапа.</p><Button variant="outline" onClick={reset}>Сбросить демо-данные</Button><details className="rounded-xl border border-border bg-white p-4"><summary className="cursor-pointer font-bold">Настроить подробнее</summary><p className="mt-3 text-sm text-muted-foreground">Позже здесь будут профили питания, лимиты бюджета, синхронизация и AI-фото холодильника.</p></details></CardContent></Card><Card><CardHeader><CardTitle>Мои вкусы и любимые блюда</CardTitle></CardHeader><CardContent className="space-y-3"><Textarea placeholder="Надиктуйте или напишите: что любите, что дети не едят, какие завтраки нормальные, какие блюда хочется чаще. Например: люблю сырники, курицу в духовке, салат огурцы-помидоры; не ставь какао к гречневой каше." /><div className="grid gap-2 sm:grid-cols-2"><Button variant="soft">🎙️ Надиктовать вкусы</Button><Button variant="outline">📷 Добавить блюдо по фото</Button></div><p className="text-sm text-muted-foreground">MVP сохраняет это как будущий сценарий. Следующий этап: голос → текст → вкусовой профиль; фото блюда → подтверждение → любимые блюда.</p></CardContent></Card><Card><CardHeader><CardTitle>Импорт рецепта по ссылке</CardTitle></CardHeader><CardContent className="space-y-3"><Input placeholder="Ссылка на рецепт" defaultValue={state.recipes[0]?.url} /><Input placeholder="Название черновика" defaultValue={state.recipes[0]?.title} /><Textarea placeholder="Ингредиенты вручную. Позже сюда подключится schema.org Recipe parser." /><Textarea placeholder="Шаги приготовления" /><Button variant="soft">Сохранить черновик</Button></CardContent></Card></div>; }
+function SettingsView({ reset, onNavigate }: { reset: () => void; onNavigate: (section: (typeof sections)[number][0]) => void }) { return <div className="grid gap-4 xl:grid-cols-2"><Card><CardHeader><CardTitle>Настройки MVP</CardTitle></CardHeader><CardContent className="space-y-3"><p className="text-muted-foreground">Данные хранятся локально в браузере. Синхронизацию между семьями подключим через облачную базу на следующем этапе.</p><Button variant="outline" onClick={reset}>Сбросить демо-данные</Button></CardContent></Card><Card><CardHeader><CardTitle>Вкусы и ограничения</CardTitle></CardHeader><CardContent className="space-y-3"><p className="text-sm text-muted-foreground">Любимые блюда, запреты и заметки уже редактируются в профилях семьи и влияют на новое меню.</p><Button variant="soft" onClick={() => onNavigate("Семья")}><Users size={16} />Открыть профили семьи</Button></CardContent></Card><Card><CardHeader><CardTitle>Импорт рецепта</CardTitle></CardHeader><CardContent className="space-y-3"><p className="text-sm text-muted-foreground">В разделе «Блюда» работает ручной рецепт и черновик из вставленного текста со снимка. Настоящее распознавание изображения подключим вместе с AI.</p><Button variant="soft" onClick={() => onNavigate("Блюда")}><Camera size={16} />Открыть рецепты и импорт</Button><Button variant="outline" disabled><Sparkles size={16} />AI-распознавание: позже</Button></CardContent></Card></div>; }
 
 function ShoppingPreview({ items, onOpen }: { items: ShoppingItem[]; onOpen: () => void }) {
   const visible = items.filter((item) => !item.checked && !item.alreadyAtHome).slice(0, 6);

@@ -126,11 +126,9 @@ export function generateWeek(state: AppState, mode: "balanced" | "simple" | "che
       notes: "Основа + дополнение + напиток/фрукт/овощи. Сладкая выпечка только как добавка.",
     });
 
-    if (index % 2 === 0) {
-      const soup = pickPersonalized(soupPool, index + 2, used, state);
-      used.add(soup.id);
-      meals.push({ id: `${date}-lunch`, date, kind: "lunch", title: "Обед", source: "generated", components: [{ slot: "soup", dishId: soup.id }], notes: "Простой семейный обед." });
-    }
+    const soup = pickPersonalized(soupPool, index + 2, used, state);
+    used.add(soup.id);
+    meals.push({ id: `${date}-lunch`, date, kind: "lunch", title: "Обед", source: "generated", components: [{ slot: "soup", dishId: soup.id }], notes: "Простой семейный обед." });
 
     const main = pickPersonalized(mainPool.length ? mainPool : role(state.dishes, "main", state.bannedDishIds), index + 12, used, state);
     const side = pickPersonalized(sidePool, index + 20, used, state);
@@ -204,7 +202,7 @@ export function banDish(state: AppState, dishId: string): AppState {
 
 export function buildShoppingList(state: AppState): ShoppingItem[] {
   const dishMap = byId(state.dishes);
-  const needs = new Map<string, ShoppingItem>();
+  const requested = new Map<string, ShoppingItem>();
   const available = new Map<string, number>();
   [...state.inventory.map((item) => ({ name: item.product, amount: item.amount })), ...state.leftovers.map((item) => ({ name: item.name, amount: 1 })), ...state.freezer.map((item) => ({ name: item.name, amount: 1 }))].forEach((item) => {
     available.set(item.name.toLowerCase(), (available.get(item.name.toLowerCase()) ?? 0) + item.amount);
@@ -214,16 +212,108 @@ export function buildShoppingList(state: AppState): ShoppingItem[] {
     const dish = dishMap.get(component.dishId);
     dish?.ingredients.forEach((ingredient) => {
       const key = ingredient.name.toLowerCase();
-      const atHome = available.get(key) ?? 0;
-      const missing = Math.max(0, ingredient.amount - atHome);
-      if (missing <= 0) return;
-      const existing = needs.get(key);
-      if (existing) existing.amount += missing;
-      else needs.set(key, { id: `shop-${key}`, product: ingredient.name, amount: missing, unit: ingredient.unit, category: ingredient.category, checked: false, alreadyAtHome: false });
+      const existing = requested.get(key);
+      if (existing) existing.amount += ingredient.amount;
+      else requested.set(key, { id: `shop-${key}`, product: ingredient.name, amount: ingredient.amount, unit: ingredient.unit, category: ingredient.category, checked: false, alreadyAtHome: false });
     });
   }));
 
-  return Array.from(needs.values()).sort((a, b) => a.category.localeCompare(b.category, "ru") || a.product.localeCompare(b.product, "ru"));
+  return Array.from(requested.values())
+    .map((item) => ({ ...item, amount: Math.max(0, item.amount - (available.get(item.product.toLowerCase()) ?? 0)) }))
+    .filter((item) => item.amount > 0)
+    .sort((a, b) => a.category.localeCompare(b.category, "ru") || a.product.localeCompare(b.product, "ru"));
+}
+
+export interface DishSuggestion {
+  dish: DishComponent;
+  matchedIngredients: string[];
+  missingIngredients: string[];
+  reason: string;
+}
+
+function approximateMinutes(dish: DishComponent) {
+  return dish.effort === "easy" ? 30 : dish.effort === "medium" ? 50 : 75;
+}
+
+function ingredientMatches(ingredient: string, available: string[]) {
+  const normalized = ingredient.toLowerCase();
+  const stem = normalized.slice(0, 5);
+  return available.some((item) => {
+    const candidate = item.toLowerCase();
+    return normalized.includes(candidate) || candidate.includes(normalized) || (stem.length >= 4 && candidate.includes(stem));
+  });
+}
+
+export function suggestDishesFromPantry(
+  state: AppState,
+  products: string,
+  maxMinutes: number,
+  budget: "balanced" | "economy",
+): DishSuggestion[] {
+  const entered = products.split(/[,;\n]/).map((item) => item.trim()).filter(Boolean);
+  const available = [
+    ...entered,
+    ...state.inventory.map((item) => item.product),
+    ...state.leftovers.map((item) => item.name),
+    ...state.freezer.map((item) => item.name),
+  ];
+
+  return state.dishes
+    .filter((dish) => ["main", "soup", "leftover_based", "freezer_item"].includes(dish.role) && !state.bannedDishIds.includes(dish.id))
+    .map((dish) => {
+      const matchedIngredients = dish.ingredients.filter((item) => ingredientMatches(item.name, available)).map((item) => item.name);
+      const missingIngredients = dish.ingredients.filter((item) => !ingredientMatches(item.name, available)).map((item) => item.name);
+      const timeFits = approximateMinutes(dish) <= maxMinutes;
+      const budgetFits = budget === "balanced" || dish.cost === "low";
+      const score = (matchedIngredients.length * 8) - (missingIngredients.length * 2) + preferenceScore(state, dish) + (timeFits ? 4 : -5) + (budgetFits ? 3 : -3);
+      const reason = matchedIngredients.length
+        ? `Уже есть: ${matchedIngredients.join(", ")}${missingIngredients.length ? `. Докупить: ${missingIngredients.join(", ")}.` : ". Все нужное уже дома."}`
+        : `Подходит семье${timeFits ? " и укладывается по времени" : ""}; продукты можно добавить в покупки.`;
+      return { dish, matchedIngredients, missingIngredients, reason, score };
+    })
+    .sort((a, b) => b.score - a.score || a.dish.name.localeCompare(b.dish.name, "ru"))
+    .slice(0, 5)
+    .map((suggestion) => ({
+      dish: suggestion.dish,
+      matchedIngredients: suggestion.matchedIngredients,
+      missingIngredients: suggestion.missingIngredients,
+      reason: suggestion.reason,
+    }));
+}
+
+export function estimatedPlanCost(state: AppState, meals = state.meals) {
+  const prices = { low: 7, medium: 13, high: 22 };
+  const dishMap = byId(state.dishes);
+  return meals.reduce((total, meal) => total + meal.components.reduce((mealTotal, component) => {
+    const dish = dishMap.get(component.dishId);
+    return mealTotal + (dish ? prices[dish.cost] : 0);
+  }, 0), 0);
+}
+
+export function planDishForDate(state: AppState, dishId: string, date: string, kind: MealKind = "dinner"): AppState {
+  const dish = state.dishes.find((item) => item.id === dishId);
+  if (!dish) return state;
+  const targetSlot = slotForMealKind(kind, dish.role);
+  const existing = state.meals.find((meal) => meal.date === date && meal.kind === kind);
+  const meals = existing
+    ? state.meals.map((meal) => {
+      if (meal.id !== existing.id) return meal;
+      const hasSlot = meal.components.some((component) => component.slot === targetSlot);
+      const components = hasSlot
+        ? meal.components.map((component) => component.slot === targetSlot ? { ...component, dishId } : component)
+        : [{ slot: targetSlot, dishId }, ...meal.components];
+      return { ...meal, components, source: "manual" as const, notes: `${mealLabel(kind)} подобран из домашних запасов.` };
+    })
+    : [...state.meals, {
+      id: `${date}-${kind}-pantry-${Date.now()}`,
+      date,
+      kind,
+      title: mealLabel(kind),
+      source: "manual" as const,
+      notes: `${mealLabel(kind)} подобран из домашних запасов.`,
+      components: [{ slot: targetSlot, dishId }],
+    }];
+  return { ...state, meals, shopping: buildShoppingList({ ...state, meals }) };
 }
 
 export function addManualShoppingItem(state: AppState, product: string): AppState {

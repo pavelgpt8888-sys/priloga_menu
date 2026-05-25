@@ -171,7 +171,6 @@ const recipeFromDish = (dish: DishComponent, index: number): RecipeEntry => {
 
 export const recipes: RecipeEntry[] = dishes
   .filter((dish) => ["breakfast_base", "main", "soup", "salad", "dessert"].includes(dish.role))
-  .slice(0, 30)
   .map(recipeFromDish);
 
 export const inventory: InventoryItem[] = [
