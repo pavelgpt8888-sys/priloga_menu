@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { hydrateState, seededState } from "../local-state";
-import { addRecipeToShopping, buildShoppingList, byId, generateWeek, replaceComponent } from "../planner";
+import { addRecipeToShopping, buildShoppingList, generateWeek, generateWeekResult, replaceComponent } from "../planner";
 import { fixedNow, generatedDemoState, manualAndCheckedShoppingState, mergingRecipeFixture, mixedUnitState, nestedMutationState, recipeFixture, restrictionBypassState } from "../../../test/fixtures/family-state";
 
 beforeEach(() => {
@@ -63,14 +63,18 @@ describe("known current defects", () => {
     ]);
   });
 
-  it("current behavior: uses a restricted fish dish when it is the only main candidate", () => {
+  it("leaves dinner main empty when restricted fish is the only candidate", () => {
     const state = restrictionBypassState();
-    const dishes = byId(state.dishes);
-    const dinnerMainIds = generateWeek(state)
+    const result = generateWeekResult(state);
+    const dinnerMainIds = result.meals
       .filter((meal) => meal.kind === "dinner")
       .map((meal) => meal.components.find((component) => component.slot === "main")?.dishId);
 
-    expect(dinnerMainIds.map((id) => id ? dishes.get(id)?.name : undefined)).toContain("Рыба запеченная");
+    expect(result).toMatchObject({ status: "blocked", reason: "no_safe_candidate" });
+    expect(dinnerMainIds).toEqual(Array(7).fill(undefined));
+    expect(result.blockedSlots).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "dinner", slot: "main", reason: "no_safe_candidate" }),
+    ]));
   });
 
   it("current behavior: replacement recalculation drops manual and checked shopping state", () => {
