@@ -4,12 +4,26 @@
 
 GitHub stores the code. Vercel shows the app to testers. Codex changes only the needed parts of the code and keeps rollback easy.
 
+## Local preflight
+
+Use Node.js `^20.19.0 || >=22.12.0` and the committed npm lockfile. Next.js itself supports Node `>=20.9.0`, while the pinned Vitest/Vite runner raises the preflight requirement to the documented range. Before every implementation PR, run this clean local baseline:
+
+```bash
+npm ci
+npm run lint
+npm run typecheck
+npm test
+npm run build
+```
+
+`npm run preflight` runs the final four commands in that order after `npm ci`. The test command uses the local Vitest runner and does not need a browser, database, LLM, or network service. GitHub Actions is intentionally not part of this baseline.
+
 ## Normal Change Flow
 
 1. Read the current code and understand the existing pattern.
 2. Make a small scoped change.
-3. Run `npm run lint`.
-4. Run `npm run build`.
+3. Run targeted checks for the changed behavior.
+4. Run the complete local preflight above.
 5. Test the changed screen locally when relevant.
 6. Commit with a clear message.
 7. Push to GitHub.
