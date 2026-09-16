@@ -1,8 +1,28 @@
 import type { AppState, DishComponent, DishRole, MealComponent, MealKind, MealPlan, RecipeEntry, ShoppingItem, StoragePlace } from "./types";
 import { combineQuantities, parseQuantity, quantityGroupKey, subtractQuantities, type NormalizedQuantity } from "./quantity";
+import { safeDishes, validateDishRestrictions, type RestrictionBlockReason, type RestrictionIssue } from "./restrictions";
 
 const dayMs = 24 * 60 * 60 * 1000;
 const iso = (date: Date) => date.toISOString().slice(0, 10);
+
+export type PlannerBlockReason = RestrictionBlockReason | "no_safe_candidate";
+
+export type MenuMutationResult =
+  | { status: "applied"; state: AppState }
+  | { status: "blocked"; state: AppState; reason: PlannerBlockReason; issues: RestrictionIssue[] };
+
+export type PlannerInteractionResult = MenuMutationResult & { message: string };
+
+export interface BlockedMenuSlot {
+  date: string;
+  kind: MealKind;
+  slot: MealComponent["slot"];
+  reason: "no_safe_candidate";
+}
+
+export type WeekGenerationResult =
+  | { status: "applied"; meals: MealPlan[]; blockedSlots: [] }
+  | { status: "blocked"; meals: MealPlan[]; reason: "no_safe_candidate"; blockedSlots: BlockedMenuSlot[] };
 
 export function startOfToday() {
   const date = new Date();
@@ -19,7 +39,7 @@ export function byId(dishes: DishComponent[]) {
   return new Map(dishes.map((dish) => [dish.id, dish]));
 }
 
-function pick(pool: DishComponent[], seed: number, used: Set<string>, fallbackPool = pool) {
+function pick(pool: DishComponent[], seed: number, used: Set<string>, fallbackPool = pool): DishComponent | undefined {
   const available = pool.filter((dish) => !used.has(dish.id));
   const source = available.length ? available : fallbackPool;
   return source[Math.abs(seed) % source.length];
@@ -37,6 +57,10 @@ function role(dishes: DishComponent[], dishRole: DishRole, banned: string[], fil
   });
 }
 
+function safeRole(state: AppState, dishRole: DishRole, filters: Partial<DishComponent> = {}) {
+  return safeDishes(state, role(state.dishes, dishRole, state.bannedDishIds, filters));
+}
+
 function textHas(dish: DishComponent, words: string[]) {
   const text = `${dish.name} ${dish.ingredients.map((item) => item.name).join(" ")}`.toLowerCase();
   return words.some((word) => text.includes(word.toLowerCase()));
@@ -50,12 +74,10 @@ function preferenceScore(state: AppState, dish: DishComponent) {
   let score = 0;
   state.family.forEach((member) => {
     const dislikes = memberWords(member.dislikes);
-    const restrictions = memberWords(member.restrictions);
     const likes = memberWords(member.likes);
     const favorites = memberWords(member.favoriteDishes);
     const childWeight = member.role === "child" ? 2 : member.role === "teen" ? 1.5 : 1;
 
-    if (textHas(dish, restrictions)) score -= 12 * childWeight;
     if (textHas(dish, dislikes)) score -= 5 * childWeight;
     if (textHas(dish, likes)) score += 2;
     if (favorites.some((favorite) => dish.name.toLowerCase().includes(favorite))) score += 5;
@@ -94,74 +116,133 @@ function breakfastDrinkPool(base: DishComponent, addons: DishComponent[]) {
   return drinks.length ? drinks : addons;
 }
 
-export function generateWeek(state: AppState, mode: "balanced" | "simple" | "cheap" | "leftovers" | "freezer" = "balanced"): MealPlan[] {
+export function generateWeekResult(state: AppState, mode: "balanced" | "simple" | "cheap" | "leftovers" | "freezer" = "balanced"): WeekGenerationResult {
   const used = new Set<string>();
   const dates = nextSevenDays();
   const meals: MealPlan[] = [];
+  const blockedSlots: BlockedMenuSlot[] = [];
+
+  function component(date: string, kind: MealKind, slot: MealComponent["slot"], dish: DishComponent | undefined): MealComponent[] {
+    if (!dish) {
+      blockedSlots.push({ date, kind, slot, reason: "no_safe_candidate" });
+      return [];
+    }
+    used.add(dish.id);
+    return [{ slot, dishId: dish.id }];
+  }
 
   dates.forEach((date, index) => {
     const weekend = index >= 5;
     const simple = mode === "simple" || (!weekend && index % 2 === 1);
     const cheap = mode === "cheap";
-    const breakfastBasePool = role(state.dishes, "breakfast_base", state.bannedDishIds, simple ? { effort: "easy" } : {});
-    const addonPool = role(state.dishes, "breakfast_addon", state.bannedDishIds);
+    const breakfastBasePool = safeRole(state, "breakfast_base", simple ? { effort: "easy" } : {});
+    const breakfastBaseFallback = safeRole(state, "breakfast_base");
+    const addonPool = safeRole(state, "breakfast_addon");
     const mainPool = mode === "leftovers"
-      ? role(state.dishes, "leftover_based", state.bannedDishIds)
+      ? safeRole(state, "leftover_based")
       : mode === "freezer"
-        ? role(state.dishes, "freezer_item", state.bannedDishIds)
-        : role(state.dishes, "main", state.bannedDishIds, cheap ? { cost: "low" } : simple ? { effort: "easy" } : {});
-    const sidePool = role(state.dishes, "side", state.bannedDishIds);
-    const saladPool = role(state.dishes, "salad", state.bannedDishIds, weekend ? {} : { effort: "easy" });
-    const kidsVegPool = role(state.dishes, "kids_vegetables", state.bannedDishIds);
-    const soupPool = role(state.dishes, "soup", state.bannedDishIds);
+        ? safeRole(state, "freezer_item")
+        : safeRole(state, "main", cheap ? { cost: "low" } : simple ? { effort: "easy" } : {});
+    const mainFallback = safeRole(state, "main");
+    const sidePool = safeRole(state, "side");
+    const saladPool = safeRole(state, "salad", weekend ? {} : { effort: "easy" });
+    const saladFallback = safeRole(state, "salad");
+    const kidsVegPool = safeRole(state, "kids_vegetables");
+    const soupPool = safeRole(state, "soup");
 
-    const base = pickPersonalized(breakfastBasePool, index + 1, used, state);
-    const addonChoices = breakfastAddonPool(base, addonPool);
+    const base = pickPersonalized(breakfastBasePool, index + 1, used, state, breakfastBaseFallback);
+    const addonChoices = base ? breakfastAddonPool(base, addonPool) : addonPool.filter((dish) => !dish.sweetPastry);
     const addon = pickPersonalized(addonChoices.length ? addonChoices : addonPool.filter((dish) => !dish.sweetPastry), index + 4, used, state, addonPool);
-    const drink = pickPersonalized(breakfastDrinkPool(base, addonPool), index + 9, used, state, addonPool);
-    used.add(base.id); used.add(addon.id);
+    const drinkChoices = base ? breakfastDrinkPool(base, addonPool) : addonPool;
+    const drink = pickPersonalized(drinkChoices, index + 9, used, state, addonPool);
 
     meals.push({
       id: `${date}-breakfast`, date, kind: "breakfast", title: "Завтрак", source: "generated",
-      components: [{ slot: "base", dishId: base.id }, { slot: "addon", dishId: addon.id }, { slot: "drink", dishId: drink.id }],
+      components: [
+        ...component(date, "breakfast", "base", base),
+        ...component(date, "breakfast", "addon", addon),
+        ...component(date, "breakfast", "drink", drink),
+      ],
       notes: "Основа + дополнение + напиток/фрукт/овощи. Сладкая выпечка только как добавка.",
     });
 
     const soup = pickPersonalized(soupPool, index + 2, used, state);
-    used.add(soup.id);
-    meals.push({ id: `${date}-lunch`, date, kind: "lunch", title: "Обед", source: "generated", components: [{ slot: "soup", dishId: soup.id }], notes: "Простой семейный обед." });
+    meals.push({ id: `${date}-lunch`, date, kind: "lunch", title: "Обед", source: "generated", components: component(date, "lunch", "soup", soup), notes: "Простой семейный обед." });
 
-    const main = pickPersonalized(mainPool.length ? mainPool : role(state.dishes, "main", state.bannedDishIds), index + 12, used, state);
+    const main = pickPersonalized(mainPool, index + 12, used, state, mainFallback);
     const side = pickPersonalized(sidePool, index + 20, used, state);
-    const salad = pickPersonalized(saladPool, index + 30, used, state);
+    const salad = pickPersonalized(saladPool, index + 30, used, state, saladFallback);
     const kidsVeg = pickPersonalized(kidsVegPool, index + 40, used, state);
-    [main, side, salad, kidsVeg].forEach((dish) => used.add(dish.id));
     meals.push({
       id: `${date}-dinner`, date, kind: "dinner", title: "Ужин", source: "generated",
       components: [
-        { slot: "main", dishId: main.id }, { slot: "side", dishId: side.id },
-        { slot: "salad", dishId: salad.id }, { slot: "kidsVegetables", dishId: kidsVeg.id },
+        ...component(date, "dinner", "main", main),
+        ...component(date, "dinner", "side", side),
+        ...component(date, "dinner", "salad", salad),
+        ...component(date, "dinner", "kidsVegetables", kidsVeg),
       ],
       notes: "Взрослым салат, детям простые овощи.",
     });
   });
 
-  return meals;
+  const visibleMeals = blockedSlots.length
+    ? meals.map((meal) => blockedSlots.some((blocked) => blocked.date === meal.date && blocked.kind === meal.kind)
+      ? { ...meal, notes: `${meal.notes ?? ""} Безопасный вариант для одного или нескольких слотов не найден.`.trim() }
+      : meal)
+    : meals;
+
+  return blockedSlots.length
+    ? { status: "blocked", meals: visibleMeals, reason: "no_safe_candidate", blockedSlots }
+    : { status: "applied", meals, blockedSlots: [] };
 }
 
-export function replaceComponent(state: AppState, mealId: string, slot: MealComponent["slot"], prefer?: DishRole): AppState {
+export function generateWeek(state: AppState, mode: "balanced" | "simple" | "cheap" | "leftovers" | "freezer" = "balanced"): MealPlan[] {
+  return generateWeekResult(state, mode).meals;
+}
+
+function blockedMutation(state: AppState, reason: PlannerBlockReason, issues: RestrictionIssue[] = []): MenuMutationResult {
+  return { status: "blocked", state, reason, issues };
+}
+
+function validateCandidate(state: AppState, dish: DishComponent): MenuMutationResult | undefined {
+  const validation = validateDishRestrictions(state, dish);
+  if (validation.status === "safe") return undefined;
+  return blockedMutation(state, validation.reason, validation.issues);
+}
+
+function validateMeal(state: AppState, meal: MealPlan): MenuMutationResult | undefined {
+  const dishes = byId(state.dishes);
+  for (const componentToValidate of meal.components) {
+    const dish = dishes.get(componentToValidate.dishId);
+    if (!dish) return blockedMutation(state, "no_safe_candidate");
+    const blocked = validateCandidate(state, dish);
+    if (blocked) return blocked;
+  }
+  return undefined;
+}
+
+export function replaceComponentResult(state: AppState, mealId: string, slot: MealComponent["slot"], prefer?: DishRole): MenuMutationResult {
   const dishMap = byId(state.dishes);
+  let missingSafeCandidate = false;
   const meals = state.meals.map((meal) => {
     if (meal.id !== mealId) return meal;
     const current = meal.components.find((component) => component.slot === slot);
     const roleToUse = prefer ?? (current ? dishMap.get(current.dishId)?.role : undefined);
     if (!roleToUse) return meal;
-    const candidates = personalizedPool(role(state.dishes, roleToUse, state.bannedDishIds), state).filter((dish) => dish.id !== current?.dishId);
-    const next = candidates[0] ?? state.dishes.find((dish) => dish.role === roleToUse);
-    if (!next) return meal;
+    const candidates = personalizedPool(safeRole(state, roleToUse), state).filter((dish) => dish.id !== current?.dishId);
+    const next = candidates[0];
+    if (!next) {
+      missingSafeCandidate = true;
+      return meal;
+    }
     return { ...meal, components: meal.components.map((component) => component.slot === slot ? { ...component, dishId: next.id } : component) };
   });
-  return { ...state, meals, shopping: buildShoppingList({ ...state, meals }) };
+  if (missingSafeCandidate) return blockedMutation(state, "no_safe_candidate");
+  return { status: "applied", state: { ...state, meals, shopping: buildShoppingList({ ...state, meals }) } };
+}
+
+export function replaceComponent(state: AppState, mealId: string, slot: MealComponent["slot"], prefer?: DishRole): AppState {
+  return replaceComponentResult(state, mealId, slot, prefer).state;
 }
 
 export function replacementOptions(state: AppState, mealId: string, slot: MealComponent["slot"]): DishComponent[] {
@@ -170,7 +251,7 @@ export function replacementOptions(state: AppState, mealId: string, slot: MealCo
   const currentDish = current ? state.dishes.find((dish) => dish.id === current.dishId) : undefined;
   const roleToUse = currentDish?.role;
   if (!roleToUse) return [];
-  let candidates = personalizedPool(role(state.dishes, roleToUse, state.bannedDishIds), state).filter((dish) => dish.id !== currentDish.id);
+  let candidates = personalizedPool(safeRole(state, roleToUse), state).filter((dish) => dish.id !== currentDish.id);
   if (meal?.kind === "breakfast" && slot === "addon") {
     const baseId = meal.components.find((component) => component.slot === "base")?.dishId;
     const base = state.dishes.find((dish) => dish.id === baseId);
@@ -184,12 +265,20 @@ export function replacementOptions(state: AppState, mealId: string, slot: MealCo
   return candidates.slice(0, 12);
 }
 
-export function replaceComponentWithDish(state: AppState, mealId: string, slot: MealComponent["slot"], dishId: string): AppState {
+export function replaceComponentWithDishResult(state: AppState, mealId: string, slot: MealComponent["slot"], dishId: string): MenuMutationResult {
+  const dish = state.dishes.find((item) => item.id === dishId);
+  if (!dish) return blockedMutation(state, "no_safe_candidate");
+  const blocked = validateCandidate(state, dish);
+  if (blocked) return blocked;
   const meals = state.meals.map((meal) => meal.id === mealId ? {
     ...meal,
     components: meal.components.map((component) => component.slot === slot ? { ...component, dishId } : component),
   } : meal);
-  return { ...state, meals, shopping: buildShoppingList({ ...state, meals }) };
+  return { status: "applied", state: { ...state, meals, shopping: buildShoppingList({ ...state, meals }) } };
+}
+
+export function replaceComponentWithDish(state: AppState, mealId: string, slot: MealComponent["slot"], dishId: string): AppState {
+  return replaceComponentWithDishResult(state, mealId, slot, dishId).state;
 }
 
 export function removeComponent(state: AppState, mealId: string, slot: MealComponent["slot"]): AppState {
@@ -338,6 +427,7 @@ export function suggestDishesFromPantry(
 
   return state.dishes
     .filter((dish) => ["main", "soup", "leftover_based", "freezer_item"].includes(dish.role) && !state.bannedDishIds.includes(dish.id))
+    .filter((dish) => validateDishRestrictions(state, dish).status === "safe")
     .map((dish) => {
       const matchedIngredients = dish.ingredients.filter((item) => ingredientMatches(item.name, available)).map((item) => item.name);
       const missingIngredients = dish.ingredients.filter((item) => !ingredientMatches(item.name, available)).map((item) => item.name);
@@ -368,9 +458,11 @@ export function estimatedPlanCost(state: AppState, meals = state.meals) {
   }, 0), 0);
 }
 
-export function planDishForDate(state: AppState, dishId: string, date: string, kind: MealKind = "dinner"): AppState {
+export function planDishForDateResult(state: AppState, dishId: string, date: string, kind: MealKind = "dinner"): MenuMutationResult {
   const dish = state.dishes.find((item) => item.id === dishId);
-  if (!dish) return state;
+  if (!dish) return blockedMutation(state, "no_safe_candidate");
+  const blocked = validateCandidate(state, dish);
+  if (blocked) return blocked;
   const targetSlot = slotForMealKind(kind, dish.role);
   const existing = state.meals.find((meal) => meal.date === date && meal.kind === kind);
   const meals = existing
@@ -391,7 +483,11 @@ export function planDishForDate(state: AppState, dishId: string, date: string, k
       notes: `${mealLabel(kind)} подобран из домашних запасов.`,
       components: [{ slot: targetSlot, dishId }],
     }];
-  return { ...state, meals, shopping: buildShoppingList({ ...state, meals }) };
+  return { status: "applied", state: { ...state, meals, shopping: buildShoppingList({ ...state, meals }) } };
+}
+
+export function planDishForDate(state: AppState, dishId: string, date: string, kind: MealKind = "dinner"): AppState {
+  return planDishForDateResult(state, dishId, date, kind).state;
 }
 
 export function addManualShoppingItem(state: AppState, product: string): AppState {
@@ -501,9 +597,11 @@ function ensureDishForRecipe(state: AppState, recipe: RecipeEntry, kind: MealKin
   return { state: { ...state, dishes: [...state.dishes, dish], recipes }, dish, recipe: updatedRecipe };
 }
 
-export function planRecipeForMeal(state: AppState, recipe: RecipeEntry, date: string, kind: MealKind): AppState {
+export function planRecipeForMealResult(state: AppState, recipe: RecipeEntry, date: string, kind: MealKind): MenuMutationResult {
   const prepared = ensureDishForRecipe(state, recipe, kind);
   const dish = prepared.dish;
+  const blocked = validateCandidate(prepared.state, dish);
+  if (blocked) return { ...blocked, state };
   const slot = slotForMealKind(kind, dish.role);
   const mealTitle = mealLabel(kind);
   const existing = prepared.state.meals.find((meal) => meal.date === date && meal.kind === kind);
@@ -530,24 +628,36 @@ export function planRecipeForMeal(state: AppState, recipe: RecipeEntry, date: st
     }];
   }
 
-  return { ...prepared.state, meals, shopping: buildShoppingList({ ...prepared.state, meals }) };
+  return { status: "applied", state: { ...prepared.state, meals, shopping: buildShoppingList({ ...prepared.state, meals }) } };
 }
 
-export function moveMealToDate(state: AppState, mealId: string, date: string): AppState {
+export function planRecipeForMeal(state: AppState, recipe: RecipeEntry, date: string, kind: MealKind): AppState {
+  return planRecipeForMealResult(state, recipe, date, kind).state;
+}
+
+export function moveMealToDateResult(state: AppState, mealId: string, date: string): MenuMutationResult {
   const mealToMove = state.meals.find((meal) => meal.id === mealId);
-  if (!mealToMove) return state;
+  if (!mealToMove) return blockedMutation(state, "no_safe_candidate");
+  const blocked = validateMeal(state, mealToMove);
+  if (blocked) return blocked;
   const movedId = `${date}-${mealToMove.kind}-moved-${Date.now()}`;
   const meals = state.meals
     .filter((meal) => meal.id === mealId || !(meal.date === date && meal.kind === mealToMove.kind))
     .map((meal) => meal.id === mealId ? { ...meal, id: movedId, date, source: "manual" as const, notes: `${mealLabel(meal.kind)} перенесен вручную.` } : meal);
-  return { ...state, meals, shopping: buildShoppingList({ ...state, meals }) };
+  return { status: "applied", state: { ...state, meals, shopping: buildShoppingList({ ...state, meals }) } };
 }
 
-export function addRecipeToNextMenu(state: AppState, recipe: RecipeEntry): AppState {
+export function moveMealToDate(state: AppState, mealId: string, date: string): AppState {
+  return moveMealToDateResult(state, mealId, date).state;
+}
+
+export function addRecipeToNextMenuResult(state: AppState, recipe: RecipeEntry): MenuMutationResult {
   const dishId = recipe.linkedDishIds?.find((id) => state.dishes.some((dish) => dish.id === id));
-  if (!dishId) return state;
+  if (!dishId) return blockedMutation(state, "no_safe_candidate");
   const dish = state.dishes.find((item) => item.id === dishId);
-  if (!dish) return state;
+  if (!dish) return blockedMutation(state, "no_safe_candidate");
+  const blocked = validateCandidate(state, dish);
+  if (blocked) return blocked;
 
   const date = new Date(startOfToday());
   date.setDate(date.getDate() + 1);
@@ -562,40 +672,65 @@ export function addRecipeToNextMenu(state: AppState, recipe: RecipeEntry): AppSt
     components: [{ slot: slotForDishRole(dish.role), dishId }],
   };
   const meals = [...state.meals, meal];
-  return { ...state, meals, shopping: buildShoppingList({ ...state, meals }) };
+  return { status: "applied", state: { ...state, meals, shopping: buildShoppingList({ ...state, meals }) } };
 }
 
-export function applyQuickScenario(state: AppState, scenario: string): { state: AppState; message: string } {
-  if (scenario === "Нет времени" || scenario === "Сделать проще") return { state: { ...state, meals: generateWeek(state, "simple") }, message: "Меню упрощено: больше быстрых блюд на будни." };
-  if (scenario === "Сделать дешевле") return { state: { ...state, meals: generateWeek(state, "cheap") }, message: "Меню стало дешевле: больше простых недорогих блюд." };
-  if (scenario === "Использовать остатки") return { state: { ...state, meals: generateWeek(state, "leftovers") }, message: "Остатки встроены в ближайшие приемы пищи." };
-  if (scenario === "Из морозилки") return { state: { ...state, meals: generateWeek(state, "freezer") }, message: "Добавлены варианты из морозилки." };
-  if (scenario === "Дети это не едят") return { state: { ...state, bannedDishIds: [...state.bannedDishIds, ...state.dishes.filter((dish) => !dish.kidsFriendly).map((dish) => dish.id)] }, message: "Неподходящие детям блюда временно убраны из предложений." };
-  if (scenario === "Добавить овощи") return { state, message: "К каждому ужину уже добавлены простые овощи детям и салат взрослым." };
-  if (scenario === "Из того, что есть") return { state: { ...state, shopping: buildShoppingList(state).slice(0, 6) }, message: "Список покупок сокращен с учетом запасов дома." };
-  return { state, message: "Сценарий применен." };
+export function addRecipeToNextMenu(state: AppState, recipe: RecipeEntry): AppState {
+  return addRecipeToNextMenuResult(state, recipe).state;
 }
 
-export function parseCommand(state: AppState, text: string): { state: AppState; message: string } {
+export function repeatMealResult(state: AppState, mealId: string, date: string): MenuMutationResult {
+  const meal = state.meals.find((item) => item.id === mealId);
+  if (!meal) return blockedMutation(state, "no_safe_candidate");
+  const blocked = validateMeal(state, meal);
+  if (blocked) return blocked;
+  const copy: MealPlan = { ...meal, id: `${date}-${meal.kind}-repeat`, date, source: "manual" };
+  const meals = [...state.meals, copy];
+  return { status: "applied", state: { ...state, meals, shopping: buildShoppingList({ ...state, meals }) } };
+}
+
+function generatedInteraction(state: AppState, mode: Parameters<typeof generateWeekResult>[1], successMessage: string): PlannerInteractionResult {
+  const generated = generateWeekResult(state, mode);
+  const next = { ...state, meals: generated.meals };
+  if (generated.status === "blocked") {
+    return { status: "blocked", state: next, reason: generated.reason, issues: [], message: "Меню создано частично: для некоторых слотов нет безопасного кандидата." };
+  }
+  return { status: "applied", state: next, message: successMessage };
+}
+
+export function applyQuickScenario(state: AppState, scenario: string): PlannerInteractionResult {
+  if (scenario === "Нет времени" || scenario === "Сделать проще") return generatedInteraction(state, "simple", "Меню упрощено: больше быстрых блюд на будни.");
+  if (scenario === "Сделать дешевле") return generatedInteraction(state, "cheap", "Меню стало дешевле: больше простых недорогих блюд.");
+  if (scenario === "Использовать остатки") return generatedInteraction(state, "leftovers", "Остатки встроены в ближайшие приемы пищи.");
+  if (scenario === "Из морозилки") return generatedInteraction(state, "freezer", "Добавлены варианты из морозилки.");
+  if (scenario === "Дети это не едят") return { status: "applied", state: { ...state, bannedDishIds: [...state.bannedDishIds, ...state.dishes.filter((dish) => !dish.kidsFriendly).map((dish) => dish.id)] }, message: "Неподходящие детям блюда временно убраны из предложений." };
+  if (scenario === "Добавить овощи") return { status: "applied", state, message: "К каждому ужину уже добавлены простые овощи детям и салат взрослым." };
+  if (scenario === "Из того, что есть") return { status: "applied", state: { ...state, shopping: buildShoppingList(state).slice(0, 6) }, message: "Список покупок сокращен с учетом запасов дома." };
+  return { status: "applied", state, message: "Сценарий применен." };
+}
+
+export function parseCommand(state: AppState, text: string): PlannerInteractionResult {
   const lower = text.toLowerCase();
-  if (!lower.trim()) return { state, message: "Напишите бытовую команду." };
+  if (!lower.trim()) return { status: "applied", state, message: "Напишите бытовую команду." };
   if (lower.includes("убери рыбу")) {
     const fish = state.dishes.filter((dish) => dish.ingredients.some((item) => item.category === "рыба")).map((dish) => dish.id);
-    return { state: { ...state, bannedDishIds: Array.from(new Set([...state.bannedDishIds, ...fish])) }, message: "Рыба убрана из предложений на эту неделю." };
+    return { status: "applied", state: { ...state, bannedDishIds: Array.from(new Set([...state.bannedDishIds, ...fish])) }, message: "Рыба убрана из предложений на эту неделю." };
   }
-  if (lower.includes("сделай меню проще")) return { state: { ...state, meals: generateWeek(state, "simple") }, message: "Меню стало проще." };
-  if (lower.includes("остатки картофеля") || lower.includes("остатки картош")) return { state: { ...state, meals: generateWeek(state, "leftovers") }, message: "Остатки картофеля учтены в ближайших блюдах." };
-  if (lower.includes("детям вместо салата") || lower.includes("дай огурцы")) return { state, message: "Для детей оставлены простые овощи: огурцы или морковные палочки." };
+  if (lower.includes("сделай меню проще")) return generatedInteraction(state, "simple", "Меню стало проще.");
+  if (lower.includes("остатки картофеля") || lower.includes("остатки картош")) return generatedInteraction(state, "leftovers", "Остатки картофеля учтены в ближайших блюдах.");
+  if (lower.includes("детям вместо салата") || lower.includes("дай огурцы")) return { status: "applied", state, message: "Для детей оставлены простые овощи: огурцы или морковные палочки." };
   if (lower.includes("гречку на картошку") || lower.includes("гречка на картош")) {
     const potato = state.dishes.find((dish) => dish.name.includes("Картофельное пюре") || dish.name.includes("Картофель запеченный"));
-    if (!potato) return { state, message: "Не нашел картофельный гарнир." };
+    if (!potato) return { status: "blocked", state, reason: "no_safe_candidate", issues: [], message: "Не нашел картофельный гарнир." };
+    const blocked = validateCandidate(state, potato);
+    if (blocked?.status === "blocked") return { ...blocked, message: "Замена не выполнена: блюдо нарушает ограничение семьи или требует уточнения." };
     const meals = state.meals.map((meal) => ({ ...meal, components: meal.components.map((component) => {
       const dish = state.dishes.find((item) => item.id === component.dishId);
       return dish?.name.toLowerCase().includes("греч") ? { ...component, dishId: potato.id } : component;
     }) }));
-    return { state: { ...state, meals, shopping: buildShoppingList({ ...state, meals }) }, message: "Гречка заменена на картофельный гарнир." };
+    return { status: "applied", state: { ...state, meals, shopping: buildShoppingList({ ...state, meals }) }, message: "Гречка заменена на картофельный гарнир." };
   }
-  return { state, message: "Понял как заметку. В MVP работают команды про гречку, огурцы детям, остатки картофеля, рыбу и простое меню." };
+  return { status: "applied", state, message: "Понял как заметку. В MVP работают команды про гречку, огурцы детям, остатки картофеля, рыбу и простое меню." };
 }
 
 export function mealLabel(kind: MealKind) {

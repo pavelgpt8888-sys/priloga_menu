@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { hydrateState, seededState } from "@/lib/local-state";
-import { addManualShoppingItem, addRecipeToNextMenu, addRecipeToShopping, applyQuickScenario, banDish, buildShoppingList, byId, estimatedPlanCost, generateWeek, mealLabel, moveCheckedShoppingToInventory, moveMealToDate, parseCommand, planDishForDate, planRecipeForMeal, removeComponent, replaceComponent, replacementOptions, replaceComponentWithDish, startOfToday, suggestDishesFromPantry, type DishSuggestion } from "@/lib/planner";
+import { addManualShoppingItem, addRecipeToNextMenuResult, addRecipeToShopping, applyQuickScenario, banDish, buildShoppingList, byId, estimatedPlanCost, generateWeekResult, mealLabel, moveCheckedShoppingToInventory, moveMealToDateResult, parseCommand, planDishForDateResult, planRecipeForMealResult, removeComponent, repeatMealResult, replaceComponentResult, replacementOptions, replaceComponentWithDishResult, startOfToday, suggestDishesFromPantry, type DishSuggestion, type MenuMutationResult } from "@/lib/planner";
 import { formatIngredientQuantity, parseQuantity, roundQuantity } from "@/lib/quantity";
 import type { AppState, CookingSession, DishComponent, FamilyMember, FreezerItem, IngredientNeed, InventoryItem, Leftover, MealComponent, MealFeedback, MealKind, MealPlan, RecipeEntry, ShoppingCategory, ShoppingItem, StoragePlace } from "@/lib/types";
 
@@ -81,19 +81,43 @@ export default function HomePage() {
     setToast(message);
   }
 
-  function regenerate(mode: Parameters<typeof generateWeek>[1] = "balanced") {
-    const meals = generateWeek(state, mode);
-    commit({ ...state, meals, shopping: buildShoppingList({ ...state, meals }) }, "Меню на неделю пересобрано.");
+  function blockedMessage(result: Extract<MenuMutationResult, { status: "blocked" }>) {
+    if (result.reason === "hard_restriction") return "Изменение не применено: блюдо нарушает жесткое ограничение семьи.";
+    if (result.reason === "restriction_needs_clarification") return "Изменение не применено: ограничение семьи нельзя надежно проверить — нужно уточнение.";
+    return "Изменение не применено: безопасный кандидат не найден.";
+  }
+
+  function commitMenuResult(result: MenuMutationResult, successMessage: string) {
+    if (result.status === "blocked") {
+      setToast(blockedMessage(result));
+      return;
+    }
+    commit(result.state, successMessage);
+  }
+
+  function regenerate(mode: Parameters<typeof generateWeekResult>[1] = "balanced") {
+    const result = generateWeekResult(state, mode);
+    const next = { ...state, meals: result.meals, shopping: buildShoppingList({ ...state, meals: result.meals }) };
+    commit(next, result.status === "blocked" ? "Меню создано частично: небезопасные слоты оставлены пустыми." : "Меню на неделю пересобрано.");
   }
 
   function handleQuick(label: string) {
     const result = applyQuickScenario(state, label);
+    if (result.status === "blocked" && result.state === state) {
+      setToast(result.message);
+      return;
+    }
     commit({ ...result.state, shopping: buildShoppingList(result.state) }, result.message);
   }
 
   function handleCommand(event: FormEvent) {
     event.preventDefault();
     const result = parseCommand(state, command);
+    if (result.status === "blocked" && result.state === state) {
+      setToast(result.message);
+      setCommand("");
+      return;
+    }
     commit({ ...result.state, shopping: buildShoppingList(result.state) }, result.message);
     setCommand("");
   }
@@ -113,14 +137,12 @@ export default function HomePage() {
 
   function moveMeal(meal: MealPlan) {
     const date = new Date(meal.date); date.setDate(date.getDate() + 1);
-    const meals = state.meals.map((item) => item.id === meal.id ? { ...item, date: date.toISOString().slice(0, 10), id: `${date.toISOString().slice(0, 10)}-${item.kind}` } : item);
-    commit({ ...state, meals }, "Прием пищи перенесен на следующий день.");
+    commitMenuResult(moveMealToDateResult(state, meal.id, date.toISOString().slice(0, 10)), "Прием пищи перенесен на следующий день.");
   }
 
   function repeatMeal(meal: MealPlan) {
     const date = new Date(meal.date); date.setDate(date.getDate() + 1);
-    const copy = { ...meal, id: `${date.toISOString().slice(0, 10)}-${meal.kind}-repeat`, date: date.toISOString().slice(0, 10), source: "manual" as const };
-    commit({ ...state, meals: [...state.meals, copy] }, "Блюдо повторено на следующий день.");
+    commitMenuResult(repeatMealResult(state, meal.id, date.toISOString().slice(0, 10)), "Блюдо повторено на следующий день.");
   }
 
   return (
@@ -180,12 +202,11 @@ export default function HomePage() {
 
           {toast && <div className="flex flex-col gap-3 rounded-2xl border border-[#b9d6b8] bg-[#edf7ed] p-4 text-sm font-semibold text-[#285f3b] shadow-[0_12px_30px_rgba(63,125,82,0.10)] sm:flex-row sm:items-center sm:justify-between"><span>{toast}</span>{undo && <Button variant="outline" size="sm" onClick={() => { setState(undo); setUndo(null); setToast("Отменено. Вернули предыдущее состояние."); }}><RotateCcw size={16} />Отменить</Button>}</div>}
 
-          {active === "Сегодня" && <TodayView state={state} meals={todayMeals} shopping={state.shopping} dishMap={dishMap} onOpenShopping={() => setActive("Покупки")} onReplace={(meal, slot) => setReplaceRequest({ meal, slot })} onRemove={(meal, slot) => commit(removeComponent(state, meal.id, slot), `Убрали ${slotLabels[slot]}.`)} onMove={moveMeal} onRepeat={repeatMeal} onShop={addMealToShopping} onBan={(dish) => commit(banDish(state, dish.id), `${dish.name}: пока не предлагаем.`)} onCook={startCooking} onQuick={handleQuick} onPlanSuggested={(dishId, date) => commit(planDishForDate(state, dishId, date), "Подобранное блюдо поставлено на ужин, покупки пересчитаны.")} />}
+          {active === "Сегодня" && <TodayView state={state} meals={todayMeals} shopping={state.shopping} dishMap={dishMap} onOpenShopping={() => setActive("Покупки")} onReplace={(meal, slot) => setReplaceRequest({ meal, slot })} onRemove={(meal, slot) => commit(removeComponent(state, meal.id, slot), `Убрали ${slotLabels[slot]}.`)} onMove={moveMeal} onRepeat={repeatMeal} onShop={addMealToShopping} onBan={(dish) => commit(banDish(state, dish.id), `${dish.name}: пока не предлагаем.`)} onCook={startCooking} onQuick={handleQuick} onPlanSuggested={(dishId, date) => commitMenuResult(planDishForDateResult(state, dishId, date), "Подобранное блюдо поставлено на ужин, покупки пересчитаны.")} />}
           {active === "Меню" && <MenuView state={state} dishMap={dishMap} regenerate={regenerate} onReplace={(meal, slot) => setReplaceRequest({ meal, slot })} onPlanMeal={(recipe, kind, date) => {
-            const planned = planRecipeForMeal(state, recipe, date, kind);
-            commit(planned, `${mealLabel(kind)} на ${new Date(date).toLocaleDateString("ru-RU", { day: "numeric", month: "long" })}: ${recipe.title}.`);
-          }} onMoveMealToDate={(meal, date) => commit(moveMealToDate(state, meal.id, date), `${mealLabel(meal.kind)} перенесен на ${new Date(date).toLocaleDateString("ru-RU", { day: "numeric", month: "long" })}.`)} onOpenShopping={() => setActive("Покупки")} />}
-          {active === "Блюда" && <DishesView state={state} setState={setState} dishMap={dishMap} onBan={(dish) => commit(banDish(state, dish.id), `${dish.name}: скрыто из предложений.`)} onRecipeToMenu={(recipe) => commit(addRecipeToNextMenu(state, recipe), `${recipe.title}: добавлено в меню на завтра.`)} onRecipeToShopping={(recipe) => commit(addRecipeToShopping(state, recipe), `${recipe.title}: ингредиенты добавлены в покупки.`)} />}
+            commitMenuResult(planRecipeForMealResult(state, recipe, date, kind), `${mealLabel(kind)} на ${new Date(date).toLocaleDateString("ru-RU", { day: "numeric", month: "long" })}: ${recipe.title}.`);
+          }} onMoveMealToDate={(meal, date) => commitMenuResult(moveMealToDateResult(state, meal.id, date), `${mealLabel(meal.kind)} перенесен на ${new Date(date).toLocaleDateString("ru-RU", { day: "numeric", month: "long" })}.`)} onOpenShopping={() => setActive("Покупки")} />}
+          {active === "Блюда" && <DishesView state={state} setState={setState} dishMap={dishMap} onBan={(dish) => commit(banDish(state, dish.id), `${dish.name}: скрыто из предложений.`)} onRecipeToMenu={(recipe) => commitMenuResult(addRecipeToNextMenuResult(state, recipe), `${recipe.title}: добавлено в меню на завтра.`)} onRecipeToShopping={(recipe) => commit(addRecipeToShopping(state, recipe), `${recipe.title}: ингредиенты добавлены в покупки.`)} />}
           {active === "Семья" && <FamilyView state={state} setState={setState} onRebuild={() => regenerate("balanced")} />}
           {active === "Кухня" && <KitchenView state={state} dishMap={dishMap} commit={commit} />}
           {active === "Остатки" && <LeftoversView state={state} commit={commit} />}
@@ -211,7 +232,7 @@ export default function HomePage() {
         {mobilePrimarySections.map(([name, Icon]) => <button key={name} onClick={() => { setActive(name); setMoreOpen(false); }} className={`flex min-h-14 flex-col items-center justify-center gap-1 rounded-xl text-[11px] font-bold ${active === name && !moreOpen ? "text-primary" : "text-[#40504A]"}`}><Icon size={19} /><span>{name}</span></button>)}
         <button onClick={() => setMoreOpen(!moreOpen)} className={`flex min-h-14 flex-col items-center justify-center gap-1 rounded-xl text-[11px] font-bold ${moreOpen || mobileMoreSections.some(([name]) => active === name) ? "text-primary" : "text-[#40504A]"}`}><MoreHorizontal size={19} /><span>Еще</span></button>
       </nav>
-      {replaceRequest && <ReplaceDialog state={state} request={replaceRequest} onClose={() => setReplaceRequest(null)} onPick={(dishId) => { commit(replaceComponentWithDish(state, replaceRequest.meal.id, replaceRequest.slot, dishId), `Заменили ${slotLabels[replaceRequest.slot]} вручную.`); setReplaceRequest(null); }} onAuto={() => { commit(replaceComponent(state, replaceRequest.meal.id, replaceRequest.slot), `Подобрали замену для ${slotLabels[replaceRequest.slot]}.`); setReplaceRequest(null); }} />}
+      {replaceRequest && <ReplaceDialog state={state} request={replaceRequest} onClose={() => setReplaceRequest(null)} onPick={(dishId) => { commitMenuResult(replaceComponentWithDishResult(state, replaceRequest.meal.id, replaceRequest.slot, dishId), `Заменили ${slotLabels[replaceRequest.slot]} вручную.`); setReplaceRequest(null); }} onAuto={() => { commitMenuResult(replaceComponentResult(state, replaceRequest.meal.id, replaceRequest.slot), `Подобрали замену для ${slotLabels[replaceRequest.slot]}.`); setReplaceRequest(null); }} />}
     </main>
   );
 }
@@ -325,7 +346,7 @@ function MealCard({ meal, dishMap, onReplace, onRemove, onMove, onRepeat, onShop
   </Card>;
 }
 
-function MenuView({ state, dishMap, regenerate, onReplace, onPlanMeal, onMoveMealToDate, onOpenShopping }: { state: AppState; dishMap: Map<string, DishComponent>; regenerate: (mode?: Parameters<typeof generateWeek>[1]) => void; onReplace: (meal: MealPlan, slot: MealComponent["slot"]) => void; onPlanMeal: (recipe: RecipeEntry, kind: MealKind, date: string) => void; onMoveMealToDate: (meal: MealPlan, date: string) => void; onOpenShopping: () => void; }) {
+function MenuView({ state, dishMap, regenerate, onReplace, onPlanMeal, onMoveMealToDate, onOpenShopping }: { state: AppState; dishMap: Map<string, DishComponent>; regenerate: (mode?: Parameters<typeof generateWeekResult>[1]) => void; onReplace: (meal: MealPlan, slot: MealComponent["slot"]) => void; onPlanMeal: (recipe: RecipeEntry, kind: MealKind, date: string) => void; onMoveMealToDate: (meal: MealPlan, date: string) => void; onOpenShopping: () => void; }) {
   const todayIso = startOfToday().toISOString().slice(0, 10);
   const defaultPlanDate = new Date(startOfToday());
   defaultPlanDate.setDate(defaultPlanDate.getDate() + 1);
