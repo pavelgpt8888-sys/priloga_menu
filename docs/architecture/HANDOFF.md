@@ -15,7 +15,18 @@ Date: 2026-09-16. Status: stop point before implementation.
 
 Evolve the current application as a TypeScript modular monolith. First make the local family loop correct and testable; then improve the approved Today/Menu/Shopping experience; then record actual history. Shared Household, probabilistic pantry, AI adapters and retail each open only after their preceding gate.
 
-Initial Build ends at `TASK-026`; the next instruction should be one task only, normally `TASK-001`.
+Initial Build ends at `TASK-026`, but dogfood starts at Milestone A after `TASK-006`. The next instruction should be one task only, normally `TASK-001`.
+
+## Final roadmap optimization
+
+- `TASK-001`: GitHub Actions removed from scope; it creates the reproducible local `npm ci → lint → typecheck → test → build` preflight. CI is an unscheduled conditional task triggered only by collaboration/branch-protection evidence.
+- `TASK-008`: simplified to previous versioned snapshot + downloadable/readable complete JSON backup. Full restore/import preview is deferred into `TASK-029` or the first migration that proves it is needed.
+- `TASK-009+013`: pairing-eligible only with an approved navigation spec.
+- `TASK-010+014`: pairing-eligible only with an approved Today spec and a small reviewable diff.
+- `TASK-011→016` and `TASK-012→015`: remain separate; Menu/calendar and Shopping/state risks justify independently verified extraction.
+- No task ID was removed or renumbered. All 44 tasks and the final target architecture remain.
+
+Dogfood checkpoints: Milestone A after `001–006`; Milestone B after approved core UX work; Milestone C after `017,018,019,021,022`; Milestone D after `020,023,024,025`; `026` is the formal release gate.
 
 ## Product truths to preserve
 
@@ -45,10 +56,10 @@ These are documented, not fixed by this branch.
 
 ## Decisions needed from Pavel
 
-1. Approve Initial Build boundary and `TASK-001 → TASK-026` order.
+1. Approve the milestone-driven Initial Build order recorded in the backlog rather than a blind numeric `001 → 026` sequence.
 2. Approve the rule that hard restrictions fail closed, even when no plan can be generated.
 3. Confirm conservative pantry behavior: only confirmed quantity reduces shopping automatically; likely/unknown remains visible and asks only when relevant.
-4. Confirm Tomato as a test palette, not locked branding, and four-tab mobile IA as provisional.
+4. Confirm Tomato as a test palette, not locked branding. Separately approve Today, Menu/Week, Shopping, Recipe, Family, More/Kitchen, typography, density, navigation details and component/state specs before their redesign tasks.
 5. Decide whether the first pilot must support two devices. If not, defer `TASK-027+`; if yes, Shared Household follows Initial Build rather than running in parallel with core corrections.
 6. Confirm whether a rough budget with explicit coverage is useful before live retailer prices; no promise of “under N BYN” with incomplete price data.
 7. Confirm pilot scale: start with one family/two weeks for correctness, then 10–30 households/4–8 weeks for product validation.
@@ -68,4 +79,4 @@ The product task does not write the canonical vault. Candidate facts for the des
 - AI boundary: language/voice/image interpretation may propose drafts; deterministic code validates and mutates critical state.
 - UX direction: production functionality wins; A2 Bring-like/selected-day/4-tab/Tomato is provisional design evidence only.
 - First four correctness guardrails: unit arithmetic, fail-closed restrictions, shopping reconciliation, immutable Undo.
-- Execution starts with one small PR per `TASK-NNN`; architecture branch contains documentation only.
+- Execution starts with local preflight and early dogfood. One small PR per task remains the default; only the two explicitly gated UX pairs may share a PR.

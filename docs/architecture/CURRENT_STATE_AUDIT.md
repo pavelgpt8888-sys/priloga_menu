@@ -83,7 +83,7 @@ Desktop: sidebar; mobile: пять пунктов `Сегодня / Меню / �
 | F19 | `parseCommand`:498: «убери рыбу» только меняет banned list, пишет «на неделю», но срок не хранит; неизвестная команда «понял как заметку» не сохраняет заметку (S) | Сообщение не соответствует изменению; запрет живёт бессрочно | TASK-021, TASK-036 |
 | F20 | page:805–834 parser делит по запятым, числа/неизвестное → 1; нет дробей и schema.org; photo input хранит имя файла, не изображение (S) | `0,5 л` распадается; OCR/voice не реализованы | TASK-003, TASK-039 |
 | F21 | Seed содержит упрощённые составы, generic steps, пачки на один приём, фиксированные даты 2026-05..08 (S/U) | Проверенный алгоритм над плохой рецептурой всё равно даст плохие покупки | TASK-021, TASK-026 |
-| F22 | Public seed содержит персонализированные профили; нет auth, backup, retention, CI, offline service worker (S) | Не называть текущий продукт private cloud, production sync или полноценной offline PWA | TASK-001, TASK-008, TASK-028–TASK-031 |
+| F22 | Public seed содержит персонализированные профили; нет auth, backup, retention, воспроизводимого local preflight, offline service worker (S) | Не называть текущий продукт private cloud, production sync или полноценной offline PWA | TASK-001, TASK-008, TASK-028–TASK-031 |
 
 Дополнительно: aliases по первым 5 символам и substring могут путать продукты (`ingredientMatches`); `replaceComponentWithDish`/manual planning не валидируют роль, ограничения и полный состав; «Из того, что есть» сначала обрезает список, но page handler тут же пересчитывает его полностью; режим leftover/freezer выбирает классы блюд, а не резервирует конкретный существующий запас. Всё это включено в `TASK-004`, `TASK-017`–`TASK-025` и Pantry-задачи.
 

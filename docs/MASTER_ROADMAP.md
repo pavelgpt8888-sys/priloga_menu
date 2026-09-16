@@ -44,7 +44,7 @@ This package adds the repository-grounded execution layer:
 1. `architecture/CURRENT_STATE_AUDIT.md` — actual code/state/defects.
 2. `architecture/RESEARCH_RECONCILIATION.md` — accepted, changed and deferred research proposals.
 3. `architecture/TARGET_ARCHITECTURE.md` — domain/data/AI/sync decisions.
-4. `IMPLEMENTATION_BACKLOG.md` — 44 small ordered PR tasks.
+4. `IMPLEMENTATION_BACKLOG.md` — 44 stable task cards, defaulting to small individual PRs with two explicitly gated pairing candidates.
 5. `architecture/VALIDATION.md` — regression evidence and release gates.
 6. `OPEN_SOURCE_AUDIT.md` — reuse/licensing decisions.
 7. `architecture/DEVELOPMENT_WORKFLOW.md` — tools, skills/plugins and PR protocol.
@@ -80,26 +80,54 @@ No Python backend, microservices, queue, event bus, vector database, MCP runtime
 
 | Stage | Tasks | Outcome | Gate |
 |---|---:|---|---|
-| Correctness guardrails | 001–008 | reproducible baseline, units, restrictions, shopping, Undo, protected local data | known defects have regression coverage; backup works |
-| Safe modularization | 009–012 | AppShell/Today/Menu/Shopping isolated without behavior change | current flows/screens remain reachable |
-| Core UX | 013–016 | provisional four-tab IA, selected-day Today, native Shopping, local Menu actions | fewer taps, no lost functionality, approved screen specs |
-| Deterministic family core | 017–025 | recipe revisions, servings, dates, provenance, repertoire, plan/history, leftovers and learning | complete local weekly loop with explainable results |
-| Initial Build pilot | 026 | one-family two-week correctness test | Gate A |
-| Shared Household | 027–031 | one command boundary, Auth/RLS, migration, conflicts/offline shopping | Gate B; only if two-device pilot is required |
-| Smart Pantry | 032–035 | evidence, derived estimate, purchase/consumption signals, high-value questions | Gate C |
-| AI/adapters | 036–040 | schemas/evals, text, voice, import, Telegram | Gate D and separate security/privacy approvals |
+| Correctness / Milestone A | 001–006 | local preflight, units, restrictions, shopping and Undo | immediately dogfood the existing app |
+| Data protection | 007–008 | versioned state, previous snapshot and verified JSON backup | model migrations cannot start without readable backup |
+| Consumer UX / Milestone B | 009–016 with approved pairing rules | AppShell, selected-day Today, native Shopping and understandable Menu | test the real mobile experience before the family model is complete |
+| Family Core / Milestone C | 017, 018, 019, 021, 022 | recipe revisions, servings, plan identity, repertoire and deterministic planner | family uses the weekly menu |
+| Learning Loop / Milestone D | 020, 023, 024, 025 | shopping provenance, actual history, planned leftovers and transparent learning | one/two-week dogfood |
+| Initial Build pilot | 026 | one-family two-week correctness test | Initial Build release gate |
+| Shared Household | 027–031 | one command boundary, Auth/RLS, migration, conflicts/offline shopping | Household release gate; only if two-device pilot is required |
+| Smart Pantry | 032–035 | evidence, derived estimate, purchase/consumption signals, high-value questions | Pantry release gate |
+| AI/adapters | 036–040 | schemas/evals, text, voice, import, Telegram | Expansion release gate and separate security/privacy approvals |
 | Pricing/retail | 041–044 | honest reference prices, one source, matching, eventual reviewed checkout | proven retention + commercial/legal approval |
 
-## First PRs after approval
+## Updated nearest implementation order
 
-1. `TASK-001` — reproducible baseline and CI guardrail.
+1. `TASK-001` — reproducible local preflight; no GitHub Actions.
 2. `TASK-002` — characterization tests and four confirmed bug fixtures.
 3. `TASK-003` — unit-safe quantities.
 4. `TASK-004` — fail-closed hard restrictions.
 5. `TASK-005` — shopping reconciliation preserving manual/checked state.
 6. `TASK-006` — immutable transitions and trustworthy Undo.
+7. `TASK-007` — versioned local-state envelope and validation.
+8. `TASK-008` — previous snapshot + downloadable, verified JSON backup only.
+9. `TASK-009` — AppShell extraction.
+10. `TASK-013` if navigation details are approved before work; otherwise `TASK-010` as a behavior-preserving Today extraction.
 
-This order deliberately puts correctness before visual refactoring. UI extraction begins only after tests/state commands protect behavior; A2-informed changes begin only after extraction and an approved screen mini-spec.
+Milestone A dogfood runs immediately after item 6; blocking defects become focused tasks before continuing. The tenth slot is intentionally conditional so Codex does not invent an unapproved navigation design.
+
+## Task mapping after optimization
+
+- `TASK-001` keeps its ID and becomes local preflight; mandatory GitHub Actions is **deferred to an unscheduled conditional CI task**.
+- `TASK-008` keeps its ID and is simplified; full restore/import-preview is **deferred/merged into `TASK-029`** unless an earlier substantial migration proves it necessary.
+- `TASK-009 + TASK-013` may be merged into one small PR only after navigation approval.
+- `TASK-010 + TASK-014` may be merged into one small PR only after Today approval.
+- `TASK-011 → TASK-016` and `TASK-012 → TASK-015` remain separate sequential PRs.
+- No TASK was deleted or renumbered; the target stages through `TASK-044` are unchanged.
+
+This order deliberately puts correctness before visual refactoring and starts product use after six tasks, not after `TASK-026`. After `TASK-009`, approved Today extraction/redesign may pair (`010+014`); Shopping (`012→015`) and Menu (`011→016`) stay split because their state/calendar risks justify an independent extraction check.
+
+GitHub Actions is not part of the scheduled backlog. Add remote CI only when multiple developers, required PR checks, branch protection or repeated skipped local preflight create a concrete need.
+
+## Dogfood milestones before the final gate
+
+- **Milestone A — Correctness:** after `TASK-001`–`006`, test quantities, hard restrictions, shopping reconciliation and Undo in the current UI.
+- **Milestone B — Consumer UX:** after approved `TASK-009`–`016` pairs, test mobile Today/Menu/Shopping and navigation with real household routines.
+- **Milestone C — Family Core:** after `TASK-017`, `018`, `019`, `021`, `022`, use the generated weekly menu as a family.
+- **Milestone D — Learning Loop:** after `TASK-020`, `023`, `024`, `025`, run one/two weeks with shopping provenance and accepted/replaced/cooked/skipped history.
+- **`TASK-026`:** consolidate the formal Initial Build release decision; it is not the first user test.
+
+Milestone letters A–D are dogfood checkpoints. To avoid ambiguity with the older research addendum, later architecture gates are named explicitly: Initial Build, Household, Pantry and Expansion release gates.
 
 ## Decisions requiring approval
 
@@ -114,6 +142,8 @@ This order deliberately puts correctness before visual refactoring. UI extractio
 | Budget | Show coverage/unknowns; no guarantee without complete current prices | retailer data remains late |
 | Pilot | one family/2 weeks for correctness, then 10–30 households/4–8 weeks | separates engineering gate from product-market signal |
 
+The following design specifications remain separate approval gates: Today, Menu/Week, Shopping, Recipe, Family, More/Kitchen, typography, density, navigation details and shared component/state patterns. Codex may analyze or implement an approved spec but does not choose these product decisions.
+
 ## Research improvements adopted
 
 - Move commerce/SKU/promotions out of MVP despite Part 1's aggressive retail sequencing.
@@ -125,6 +155,8 @@ This order deliberately puts correctness before visual refactoring. UI extractio
 - Make planner reasons and shopping provenance inspectable.
 - Preserve minimal offline Shopping later without committing to a full CRDT.
 - Treat skills/plugins as development aids, not application infrastructure.
+- Prefer local documented preflight over premature CI infrastructure; automate remotely only when a real collaboration/protection trigger exists.
+- Start dogfood at four intermediate milestones and allow only two low-risk extraction/redesign pair candidates, avoiding both disposable work and uncontrolled refactor+redesign PRs.
 
 ## Stop condition
 

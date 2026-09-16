@@ -44,11 +44,11 @@ Test user jobs and states, not implementation structure: selected day changes re
 
 Keep a small critical set:
 
-- open/restore current state;
+- open current valid state and exercise the corruption/recovery path;
 - Today → select date → view three meals;
-- Menu → replace/move/pin without changing unrelated slots;
+- Menu → replace/move/repeat with the actions available at that stage, without changing unrelated slots;
 - Shopping → add/check/recalculate/transfer;
-- export and preview restore;
+- download and read back a complete JSON backup; full restore/import preview only when the relevant migration task exists;
 - mobile 390×844 and representative desktop viewport.
 
 ### Security/authorization tests when cloud exists
@@ -57,40 +57,66 @@ Anonymous, cross-household, removed-member, forged household ID, direct Data API
 
 ### AI evaluation when AI exists
 
-Versioned phrases with expected structured output, deterministic validation result and “no mutation” failure cases. Model/network tests use recorded mocks in CI; live evaluation is a separate controlled check.
+Versioned phrases with expected structured output, deterministic validation result and “no mutation” failure cases. Model/network tests use recorded mocks in the local test suite and in remote CI if it is later justified; live evaluation is a separate controlled check.
 
 ## Gates
 
 ### Gate 0 — before first behavior fix
 
-- clean install/lint/typecheck/build reproducible;
+- local `npm ci → lint → typecheck → test → build` preflight is reproducible;
 - four priority bug fixtures exist;
 - current mobile/desktop critical flows are captured;
 - export/backup plan exists before schema migration.
 
-### Gate A — Initial Build (`TASK-026`)
+## Dogfood milestones
+
+### Milestone A — Correctness, after `TASK-001`–`006`
+
+- use the existing UI with household-like synthetic/current local data;
+- verify quantity arithmetic, hard-rule blocking, shopping preservation and Undo;
+- log focused defects immediately rather than waiting for the completed Initial Build.
+
+### Milestone B — Consumer UX, after the approved `TASK-009`–`016` sequence
+
+- navigate Today/Menu/Shopping/More comfortably on a real phone viewport;
+- complete a selected-day change, week adjustment and store check-off flow;
+- validate the approved design specs, not A2 assumptions invented by Codex.
+
+### Milestone C — Family Core, after `TASK-017`, `018`, `019`, `021`, `022`
+
+- build and adjust a week from the family's repertoire and serving needs;
+- inspect reasons/blocked constraints;
+- use it as a family before adding history intelligence.
+
+### Milestone D — Learning Loop, after `TASK-020`, `023`, `024`, `025`
+
+- run one/two weeks of plan → shopping → cooked/skipped/replaced feedback;
+- verify provenance, planned leftovers and ranking changes;
+- feed the evidence into the formal Initial Build release gate.
+
+### Initial Build release gate (`TASK-026`)
 
 - one family can use the full weekly loop for two consecutive weeks;
 - no data loss, hard-rule violation or unexplained missing purchase;
 - quantities and serving changes are traceable;
 - Today/Menu/Shopping need no AI to work;
-- backup/restore and release rollback rehearsed.
+- backup/read-back, documented recovery path and release rollback rehearsed.
 
-### Gate B — Shared Household (`TASK-031`)
+### Household release gate (`TASK-031`)
 
 - two authenticated adults use one household with no lost scripted conflict;
 - RLS/auth negative matrix passes;
 - offline Shopping behavior and pending mutations are explicit;
 - server is the one authority after cutover.
 
-### Gate C — Smart Pantry (`TASK-035`)
+### Pantry release gate (`TASK-035`)
 
 - inferred stock reduces work rather than hiding needed goods;
 - likely/unknown never silently subtracts by default;
 - question count, ignored rate and correction rate are measured;
 - evidence projection can rebuild under a new rule version.
 
-### Gate D — before serious AI or retail
+### Expansion release gate — before serious AI or retail
 
 - repeated weekly use is demonstrated over the agreed pilot period;
 - core problems are not being “rescued” by AI;

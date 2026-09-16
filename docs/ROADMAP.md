@@ -4,7 +4,9 @@ Status: 2026-09-16
 
 This roadmap separates the **final product picture** from the **initial implementation block**. The goal is speed without a rewrite.
 
-Execution note after the repository audit: this file remains the high-level product sequence. The authoritative small-PR order is `docs/MASTER_ROADMAP.md` + `docs/IMPLEMENTATION_BACKLOG.md`. In particular, `TASK-001`–`TASK-008` add regression protection and fix the four demonstrated correctness hazards (units, hard restrictions, shopping reconciliation and immutable Undo) **before** UI extraction/redesign. This corrects the earlier impression that broad componentization should be the first implementation move.
+Execution note after the repository audit: this file remains the high-level product sequence. The authoritative small-PR order is `docs/MASTER_ROADMAP.md` + `docs/IMPLEMENTATION_BACKLOG.md`. In particular, `TASK-001`–`TASK-006` add regression protection and fix the four demonstrated correctness hazards (units, hard restrictions, shopping reconciliation and immutable Undo) **before** UI extraction/redesign; `TASK-007`–`008` then protect local data. This corrects the earlier impression that broad componentization should be the first implementation move.
+
+Final optimization: dogfood begins after `TASK-006`, then repeats after Consumer UX, Family Core and Learning Loop milestones; `TASK-026` is the formal gate, not the first real test. `TASK-001` requires local reproducible preflight, not GitHub Actions. Detailed task IDs and pairing rules live only in the implementation backlog.
 
 ## Initial implementation block — build this first
 

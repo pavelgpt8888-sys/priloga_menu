@@ -287,3 +287,20 @@ Before implementing a screen, define:
 - what NOT to show.
 
 Codex should implement an approved screen spec, not invent the product hierarchy itself.
+
+## 11. Separate decisions still awaiting approval
+
+This document is a direction brief, not a signed-off design system. Each item below needs its own approved mini-spec before redesign work:
+
+- Today information hierarchy, emphasis and contextual actions;
+- Menu/Week calendar density, local actions and plan states;
+- Shopping list-vs-tile choice, grouping, quick add and completed state;
+- Recipe/Dish content hierarchy and actions;
+- Family onboarding/profile editing;
+- More/Kitchen composition, including Leftovers, Freezer and future Smart Pantry;
+- typography family, scale and weights;
+- page/list density and spacing rhythm;
+- exact mobile/desktop navigation behavior;
+- reusable components and empty/loading/error/offline/disabled states.
+
+A2/Tomato remains provisional evidence while these are open. Codex may prepare alternatives or implement an approved spec, but must not close these product decisions itself.

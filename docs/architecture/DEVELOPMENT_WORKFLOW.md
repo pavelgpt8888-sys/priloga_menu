@@ -2,18 +2,36 @@
 
 Status: proposed execution contract after architecture approval.
 
-## One task, one branch, one PR
+## Local preflight is the required quality gate
+
+After `TASK-001`, every implementation PR must finish with a clean local sequence:
+
+```text
+npm ci
+npm run lint
+npm run typecheck
+npm test
+npm run build
+```
+
+The repository may wrap the last four commands in `npm run preflight`, but `npm ci` remains explicit so the lockfile is tested from a clean dependency state. Targeted tests and affected mobile smoke checks run in addition to this sequence.
+
+GitHub Actions is optional, not part of `TASK-001`. Create a separate CI task only when multiple developers, required PR checks, branch protection or repeated skipped local preflight make remote enforcement valuable. Remote CI must run the same contract rather than define a second one.
+
+## One task, one branch, one PR by default
 
 1. Start from current `origin/main`; read `AGENTS.md`, the task card and its dependencies.
 2. Create `codex/task-NNN-short-name` in a separate worktree/checkout if another task is active.
 3. Confirm a clean baseline and record relevant tests before editing.
 4. Implement only the named task; do not opportunistically redesign adjacent screens or schemas.
-5. Run targeted tests, then lint/typecheck/build and affected browser smoke.
+5. Run targeted tests, then the complete local preflight and affected browser smoke.
 6. Inspect the diff for production code, migrations, secrets, generated files and unrelated formatting.
 7. Commit, push and open one PR with evidence/rollback from `VALIDATION.md`.
 8. Merge only after review; tag a stable milestone only when a product gate is accepted.
 
 The expected prompt is: **“Implement only TASK-003 from `docs/IMPLEMENTATION_BACKLOG.md`, open one PR, then stop.”**
+
+Exception: `TASK-009+013` and `TASK-010+014` may share one small PR only when the corresponding navigation/Today specs were approved before work and the backlog's pairing conditions hold. Both IDs, acceptance sets and rollback paths must remain explicit. Menu and Shopping extraction/redesign pairs remain separate.
 
 ## Minimal application technology
 
@@ -75,6 +93,8 @@ Use expand/read-both/write-new/verify/cleanup-later. Never combine destructive c
 ### UX
 
 Before implementation, attach an approved mini-spec: user job, primary action, content priority, empty/loading/error/offline states, mobile behavior, accessibility/tap targets and what is deliberately omitted. A2/Tomato is evidence, not a code template.
+
+Pending independent approvals are Today, Menu/Week, Shopping, Recipe, Family, More/Kitchen, typography, density, navigation details and common components/states. Codex must stop at the relevant gate rather than choose these decisions.
 
 ## PR size and rollback
 

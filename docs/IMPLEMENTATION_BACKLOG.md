@@ -1,4 +1,4 @@
-# Implementation backlog — one task, one small PR
+# Implementation backlog — small, reviewable PR task cards
 
 Status: proposal for approval, 2026-09-16. No implementation task has started.
 
@@ -6,10 +6,10 @@ This is the executable layer under `docs/MASTER_ROADMAP.md`. Product phases rema
 
 ## Rules for every task
 
-- One PR implements only one `TASK-NNN`; incidental cleanup is out of scope.
+- Default: one PR implements one `TASK-NNN`; incidental cleanup is out of scope. The only pre-approved pairing candidates are listed in the UX sequencing section below, and both task IDs/acceptance sets remain visible in the PR.
 - Preserve existing behavior unless the task names the behavior change and includes a before/after fixture.
 - No PR may silently rewrite `family-meal-planner-state-v1`; data-format changes require backup, versioned reader and rollback notes.
-- `lint`, `build`, targeted unit/integration tests and affected mobile smoke paths must pass.
+- Every PR ends with the documented local preflight: `npm ci → lint → typecheck → test → build`, plus affected mobile smoke paths. A remote CI service is not required for this rule.
 - A PR that grows beyond roughly two engineering days, touches a second migration or needs a second product decision is split before merge.
 - No LLM, cloud persistence, Smart Pantry inference or retail integration is a dependency of the Initial Build.
 - Default rollback for code-only tasks is revert of that PR. State-changing tasks specify an additional data rollback below.
@@ -22,19 +22,36 @@ Initial Build ends after `TASK-026`. It proves:
 
 It explicitly excludes mandatory LLM, voice, OCR/vision, photo-fridge recognition, stores, real SKU, promotions, price comparison, checkout, Python, microservices, vector databases, queues and an event bus.
 
-### TASK-001 — Reproducible baseline and CI guardrail
+## Early dogfood milestones
+
+`TASK-026` remains the formal Initial Build gate, but real use starts earlier:
+
+| Milestone | Tasks/result | What we test immediately |
+|---|---|---|
+| A — Correctness | after `TASK-001`–`TASK-006` | existing application: quantities, fail-closed restrictions, shopping preservation and trustworthy Undo |
+| B — Consumer UX | after approved AppShell/Today/Shopping/Menu pairs from `TASK-009`–`TASK-016` | real mobile navigation and daily/store/week workflows; do not wait for the new product model |
+| C — Family Core | after `TASK-017`, `018`, `019`, `021`, `022` | use the weekly menu as a family: canonical recipes, servings, repertoire and deterministic planning |
+| D — Learning Loop | after `TASK-020`, `023`, `024`, `025` | one/two-week dogfood of shopping provenance, accepted/replaced/cooked/skipped history, planned leftovers and transparent learning |
+
+Each milestone may create bug-fix tasks before proceeding. Passing a milestone does not authorize the next gated architecture stage.
+
+### TASK-001 — Reproducible local preflight
 
 - Goal/value: make every later PR comparable to a known working baseline.
-- Scope/files: pin direct package ranges consistently with the lockfile; add `typecheck` and `test` placeholders/scripts; add one GitHub Actions workflow for install, lint, typecheck and build. Expected files: `package.json`, lockfile only if required, `.github/workflows/ci.yml`.
+- Scope/files: pin direct package ranges consistently with the lockfile; add real `typecheck`, `test` and `preflight` commands; configure the minimal local test runner needed for `npm test`; document `npm ci → npm run preflight`, where preflight runs lint → typecheck → test → build. Expected files: `package.json`, lockfile only if required, minimal test-runner config, `docs/WORKFLOW.md`. No GitHub Actions file.
 - Depends on: none.
-- Acceptance: clean checkout installs with `npm ci`; current UI and demo state are unchanged; CI uses one supported Node version and caches only dependencies.
-- Tests: `npm ci`, `npm run lint`, `npm run typecheck`, `npm run build`.
-- Risk/rollback: dependency drift or CI-only failure. Revert the PR; no user data changes. No framework/package-manager upgrade.
+- Acceptance: a clean checkout completes the documented preflight locally; `test` is a real command rather than a success-only placeholder; current UI/demo state are unchanged; Node/runtime expectation is documented.
+- Tests: run the exact clean preflight once and record versions/results: `npm ci`, then lint, typecheck, test and build through the documented command.
+- Risk/rollback: dependency or script drift. Revert the PR; no user data changes. No framework/package-manager upgrade and no remote CI infrastructure.
+
+#### Conditional CI task — not scheduled
+
+Do not create GitHub Actions as standard scaffolding. Open a separate optional task only when at least one trigger is real: multiple active developers, required PR status checks, branch protection for `main`, or repeated evidence that local preflight is being skipped. That task automates the same commands; it does not introduce a second quality contract.
 
 ### TASK-002 — Characterization tests for existing core behavior
 
 - Goal/value: protect current workflows before changing algorithms or moving UI code.
-- Scope/files: add Vitest and a small fixture factory; capture current menu generation, replacement, recipe-to-shopping and local state round-trip behavior, including known-bug fixtures in a separate failing-case register with the desired future assertion. Expected files: `vitest.config.ts`, `src/lib/__tests__/*`, `test/fixtures/*`, package files.
+- Scope/files: use the runner configured by `TASK-001`; add a small fixture factory and capture current menu generation, replacement, recipe-to-shopping and local state round-trip behavior, including known-bug fixtures in a separate failing-case register with the desired future assertion. Expected files: `src/lib/__tests__/*`, `test/fixtures/*`, runner config only if a real test requires refinement.
 - Depends on: `TASK-001`.
 - Acceptance: deterministic tests do not depend on wall-clock date or random global state; fixtures contain synthetic, non-personal data; the four high-priority bugs have reproducible tests.
 - Tests: unit suite plus existing lint/typecheck/build.
@@ -85,14 +102,14 @@ It explicitly excludes mandatory LLM, voice, OCR/vision, photo-fridge recognitio
 - Tests: valid v1, malformed JSON, missing references, future version, storage quota/write failure, round trip.
 - Risk/rollback: migration blocks launch. Keep legacy bytes untouched and old reader available for one release; rollback switches reader, not stored data.
 
-### TASK-008 — Export, validate and restore backup
+### TASK-008 — Minimal pre-migration JSON backup
 
-- Goal/value: the family can recover its local data before any larger migration.
-- Scope/files: add JSON export/import with schema/version summary and a preview before replacement; no cloud upload. Expected files: local-state service, Settings UI, tests.
+- Goal/value: protect all current local data before changing the domain model without building a restoration product prematurely.
+- Scope/files: before a migration, preserve the previous versioned snapshot; allow downloading the complete state as JSON; immediately read/validate the produced backup and show a simple success/error result. Expected files: local-state service, one minimal Settings action, tests. No general import, merge, preview or restore wizard.
 - Depends on: `TASK-007`.
-- Acceptance: export contains all domain state but no secrets; import validates first, reports counts/unresolved references and requires confirmation; failed import leaves current and source files unchanged.
-- Tests: export/import equivalence; invalid version; duplicate IDs; cancelled preview; restoration after simulated corruption.
-- Risk/rollback: destructive import. Write to a new versioned key, verify read-back, then switch marker; revert UI while retaining both copies.
+- Acceptance: export contains the complete domain state/schema version and no secrets; a previous snapshot is retained before migration; backup bytes parse and validate back to equivalent state/counts; failed backup blocks migration and leaves the current key untouched.
+- Tests: complete-state JSON round trip/read-back, malformed output rejection, unavailable download/storage, previous-snapshot preservation and migration blocked on backup failure.
+- Risk/rollback: a false “backup created” result. Verify before switching any schema marker; revert the action while retaining current and previous snapshots. Full restore/import-preview moves to `TASK-029` or the first earlier migration that truly needs it.
 
 ### TASK-009 — Extract AppShell without behavior change
 
@@ -102,6 +119,7 @@ It explicitly excludes mandatory LLM, voice, OCR/vision, photo-fridge recognitio
 - Acceptance: every current section remains reachable with the same labels, focus order and responsive breakpoints; production data/state paths are unchanged.
 - Tests: component render/navigation tests; mobile and desktop screenshots/smoke; lint/build.
 - Risk/rollback: responsive regression. Revert component extraction; no state migration.
+- Pairing rule: may be combined with `TASK-013` in one small PR only if mobile navigation details and More contents are approved before work starts. Otherwise keep this mechanical extraction separate.
 
 ### TASK-010 — Extract Today screen without behavior change
 
@@ -111,6 +129,7 @@ It explicitly excludes mandatory LLM, voice, OCR/vision, photo-fridge recognitio
 - Acceptance: selected day/current meals, quick scenarios, shopping preview and pantry prompts behave as before; no business logic is copied into the component.
 - Tests: characterization render with fixed state; replace/action callbacks; mobile smoke.
 - Risk/rollback: lost callback/state coupling. Revert extraction; no schema change.
+- Pairing rule: may be combined with `TASK-014` only when the Today screen spec, states and action placement are approved before extraction. Without that approval, this remains a behavior-preserving PR.
 
 ### TASK-011 — Extract Menu screen without behavior change
 
@@ -120,6 +139,7 @@ It explicitly excludes mandatory LLM, voice, OCR/vision, photo-fridge recognitio
 - Acceptance: date selection, generate, replace, repeat and move remain available; no new plan semantics yet.
 - Tests: render each mode; fixed-date move/replace/repeat callbacks; mobile/desktop smoke.
 - Risk/rollback: calendar edge regressions. Revert extraction; data remains unchanged.
+- Pairing rule: keep separate from `TASK-016`. Menu mixes calendar rendering and fragile move/repeat/generate behavior, so an independently verified extraction materially reduces regression risk.
 
 ### TASK-012 — Extract Shopping screen without behavior change
 
@@ -129,15 +149,17 @@ It explicitly excludes mandatory LLM, voice, OCR/vision, photo-fridge recognitio
 - Acceptance: existing periods/actions and row state remain functional; reconciliation stays in the domain layer, not UI.
 - Tests: render/filter/check/add/transfer flows; narrow mobile viewport; keyboard accessibility smoke.
 - Risk/rollback: store workflow regression. Revert extraction; no schema change.
+- Pairing rule: keep separate from `TASK-015`. Shopping is a stateful execution screen and its reconciliation/checked/manual behavior must be proven unchanged before visual redesign.
 
 ### TASK-013 — Provisional four-tab mobile information architecture
 
 - Goal/value: place the weekly loop at thumb reach without deleting secondary workflows.
 - Scope/files: change mobile top-level navigation to Today / Menu / Shopping / More; place Recipes, Kitchen, Family, Leftovers, Freezer, Inventory and Settings under More/context links. A2 is reference only; desktop sidebar stays until separately reviewed.
-- Depends on: `TASK-009`–`TASK-012`; explicit approval of the provisional IA.
+- Depends on: `TASK-009`; explicit approval of navigation details and More contents. Extracted screens are helpful but not mandatory because the shell can initially point to existing section views.
 - Acceptance: every existing screen/action is still reachable; back/focus behavior is predictable; no design-branch code is copied; current functionality remains source of truth.
 - Tests: navigation reachability matrix at mobile widths; keyboard/focus smoke; desktop regression.
 - Risk/rollback: discoverability loss. Revert navigation PR; extracted screens remain reusable.
+- Pairing rule: eligible for one small PR with `TASK-009` only under the approval condition recorded there; task IDs and both acceptance sets remain in the PR.
 
 ### TASK-014 — Today as one selected day
 
@@ -147,6 +169,7 @@ It explicitly excludes mandatory LLM, voice, OCR/vision, photo-fridge recognitio
 - Acceptance: choosing a day changes real meal content and heading; missing/loading/error/empty states are defined; current actions remain available contextually; Tomato is tokenized, not hard-coded throughout.
 - Tests: fixed-date content switching; three meal states; empty slot; restriction block; responsive/a11y visual checks.
 - Risk/rollback: visual change hides actions. Keep old Today component until acceptance, then delete in a later cleanup; rollback selects old component without data change.
+- Pairing rule: eligible for one small PR with `TASK-010` only if the approved Today spec exists first and the combined diff stays reviewable; otherwise extraction and redesign remain separate.
 
 ### TASK-015 — Native, one-hand Shopping presentation
 
@@ -156,15 +179,17 @@ It explicitly excludes mandatory LLM, voice, OCR/vision, photo-fridge recognitio
 - Acceptance: check/add/quantity work one-handed; manual and derived origin is understandable without clutter; AI never interrupts store mode; loading/offline/stale state is visible.
 - Tests: tap-target/a11y checks; check/uncheck/add at 390px; 100-row performance smoke; reconciliation integration.
 - Risk/rollback: density reduces clarity. Revert view component; shopping domain/state unchanged.
+- Pairing rule: not combined with `TASK-012`; validate extraction first.
 
 ### TASK-016 — Menu/Week hierarchy and local actions
 
-- Goal/value: approve and adjust a week without regenerating everything.
-- Scope/files: redesign extracted Menu around week acceptance, replace one slot, pin/unpin, move and regenerate only unlocked slots; preserve day/week/month views only where useful.
-- Depends on: `TASK-011`, `TASK-013`; command semantics from `TASK-006`.
-- Acceptance: local change affects only the selected slot or unlocked set; action provenance is visible; no AI dependency.
-- Tests: pin then regenerate; replace one; move collision preview; undo; responsive/a11y checks.
+- Goal/value: make the current week understandable and locally editable without inventing unfinished plan semantics.
+- Scope/files: apply the approved Menu/Week hierarchy to the extracted screen and expose only already-supported, validated actions such as date selection, replace, move and repeat. Plan acceptance, pin/unpin and regenerate-only-unlocked are integrated later with `TASK-019`/`TASK-022`, not mocked in this UI PR.
+- Depends on: `TASK-011`, `TASK-013`; approved Menu/Week screen spec; command semantics from `TASK-006`.
+- Acceptance: the selected week/day and available local actions are clear; no action promises unsupported semantics; unrelated slots remain unchanged; no AI dependency.
+- Tests: replace one, move collision handling available at this stage, repeat, undo and responsive/a11y checks.
 - Risk/rollback: UI gets ahead of model semantics. Hide/omit actions not yet supported; revert view without touching plan data.
+- Pairing rule: not combined with `TASK-011`; validate calendar/command extraction first.
 
 ### TASK-017 — Canonical dish/recipe identity and revision
 
@@ -249,11 +274,11 @@ It explicitly excludes mandatory LLM, voice, OCR/vision, photo-fridge recognitio
 
 ### TASK-026 — Initial Build release gate and one-family pilot
 
-- Goal/value: prove the weekly loop before cloud, pantry or AI expansion.
-- Scope/files: add minimal structured product/error events with no sensitive payload, a release checklist and synthetic/one-family pilot protocol; no analytics platform required.
+- Goal/value: formally accept the weekly loop before cloud, pantry or AI expansion; this is not the first time the product is used.
+- Scope/files: consolidate evidence from Milestones A–D; add minimal structured product/error events with no sensitive payload, a release checklist and final one/two-week family pilot protocol; no analytics platform required.
 - Depends on: `TASK-001`–`TASK-025` and approved UX screens.
-- Acceptance: two consecutive weeks can be planned, adjusted, shopped and recorded without data loss, hard-rule violation or unexplained missing item; backup restore is rehearsed; known limitations are listed.
-- Tests: full browser journey on mobile and desktop; corrupted-state recovery; quantity/restriction/shopping/undo regression suite; manual accessibility pass.
+- Acceptance: two consecutive weeks can be planned, adjusted, shopped and recorded without data loss, hard-rule violation or unexplained missing item; backup generation/read-back and the documented recovery path are rehearsed; known limitations are listed.
+- Tests: full browser journey on mobile and desktop; corrupted-state recovery path; quantity/restriction/shopping/undo regression suite; manual accessibility pass.
 - Risk/rollback: pilot exposes blocking correctness issue. Stop at Initial Build, fix with a new small task; do not add AI or infrastructure to mask the failure.
 
 ## Phase H — Shared Household, only after Initial Build
@@ -279,10 +304,10 @@ It explicitly excludes mandatory LLM, voice, OCR/vision, photo-fridge recognitio
 ### TASK-029 — Previewed local-to-cloud import and authority cutover
 
 - Goal/value: existing family data moves without becoming two divergent sources of truth.
-- Scope/files: authenticate, select/create household, upload validated export with import ID, read back and compare, then mark server authoritative; local copy becomes backup/cache.
+- Scope/files: add the full restore/import-preview UX deferred from `TASK-008`; authenticate, select/create household, validate and preview the local backup, upload with import ID, read back and compare, then mark server authoritative; local copy becomes backup/cache.
 - Depends on: `TASK-008`, `TASK-028`.
-- Acceptance: import into empty household is idempotent; non-empty target requires conflict preview; counts/IDs/hash match; legacy local bytes remain downloadable.
-- Tests: success, retry, interrupted upload, non-empty conflict, read-back mismatch, rollback export.
+- Acceptance: local restore/import preview does not overwrite without confirmation; import into empty household is idempotent; non-empty target requires conflict preview; counts/IDs/hash match; legacy local bytes remain downloadable.
+- Tests: local restore preview/cancel, success, retry, interrupted upload, non-empty conflict, read-back mismatch, rollback export.
 - Risk/rollback: split brain/data loss. Never dual-write independently; failed cutover leaves local authoritative; post-cutover rollback starts from fresh server export.
 
 ### TASK-030 — Shared mutations, conflicts and minimal offline shopping
@@ -294,7 +319,7 @@ It explicitly excludes mandatory LLM, voice, OCR/vision, photo-fridge recognitio
 - Tests: two-client concurrency; duplicate/reordered mutations; offline/reconnect; removed item; stale revision; failed retry.
 - Risk/rollback: sync ambiguity. Disable offline mutation queue while keeping read cache/server commands; retain receipts for audit.
 
-### TASK-031 — Shared Household Gate B
+### TASK-031 — Shared Household release gate
 
 - Goal/value: confirm that two adults can use the same household reliably before marketing sharing.
 - Scope/files: two-device acceptance protocol, structured error codes and operational checklist; add Realtime only in a separate future task if bounded polling/refetch misses the target.
@@ -332,7 +357,7 @@ It explicitly excludes mandatory LLM, voice, OCR/vision, photo-fridge recognitio
 - Tests: planned vs cooked, partial servings, correction after purchase, negative discrepancy, expiry, duplicate cooking command.
 - Risk/rollback: recipe inaccuracies distort stock. Keep consumption estimate reversible and visibly inferred; disable automatic allocation while retaining events.
 
-### TASK-035 — Decision-relevant pantry questions and Gate C
+### TASK-035 — Decision-relevant pantry questions and Pantry release gate
 
 - Goal/value: ask only when an answer changes the current shopping decision.
 - Scope/files: deterministic ask score from uncertainty, decision relevance and optional cost/importance; cap questions; one-tap correction; measure ignored/corrected questions.
@@ -403,7 +428,7 @@ It explicitly excludes mandatory LLM, voice, OCR/vision, photo-fridge recognitio
 
 - Goal/value: validate whether real offers improve one bounded shopping decision.
 - Scope/files: one documented official API/partner feed/public catalog with retailer/store/location, validity, fetched time, loyalty and provenance; no scraper or multi-retailer platform by default.
-- Depends on: `TASK-041`, explicit partner/source approval and validation Gate D.
+- Depends on: `TASK-041`, explicit partner/source approval and the Expansion release gate.
 - Acceptance: stale/unofficial data never becomes checkout truth; source outage leaves core list usable; data retention/licensing is documented.
 - Tests: expired offer, wrong location, missing loyalty, duplicate feed item, provider outage, provenance display.
 - Risk/rollback: unstable/legal source. Disable adapter and delete cached offer projection per policy; household shopping data remains independent.
@@ -426,12 +451,22 @@ It explicitly excludes mandatory LLM, voice, OCR/vision, photo-fridge recognitio
 - Tests: price change, unavailable SKU, substitution rejection, duplicate submit, auth/payment failure, order-status reconciliation.
 - Risk/rollback: money/external side effects. Feature flag/off switch, no automatic retry of irreversible operations, provider-specific runbook and separate production approval.
 
-## Full order and allowed parallelism
+## Optimized order, pairing and allowed parallelism
 
-Default serial order is `TASK-001 → … → TASK-026`, review, then `TASK-027 → …` only after the relevant gate. Safe limited parallelism after contracts exist:
+Initial Build keeps all IDs but uses the milestone-driven execution order:
+
+1. `TASK-001 → 002 → 003 → 004 → 005 → 006` → Milestone A dogfood.
+2. `TASK-007 → 008` → protected versioned local data.
+3. UX block after approved screen specs: `TASK-009`, then optionally paired `009+013`; `010+014` is pairing-eligible; `012 → 015` and `011 → 016` remain separate. Merge one UI PR at a time → Milestone B.
+4. `TASK-017 → 018 → 019 → 021 → 022` → Milestone C family use.
+5. `TASK-020 → 023 → 024 → 025` → Milestone D one/two-week learning-loop dogfood.
+6. `TASK-026` consolidates the formal Initial Build gate.
+7. `TASK-027 → …` starts only after its relevant gate and separate approval.
+
+If design specs are not yet approved after `TASK-009`, proceed with the safe extractions `TASK-010`–`TASK-012` and stop before `TASK-013`–`TASK-016`; Codex does not fill the design gap itself. Safe limited parallelism after contracts exist:
 
 - `TASK-003` and `TASK-004` may be separate concurrent PRs after `TASK-002` if they do not edit the same planner lines; otherwise keep serial.
-- UI extraction `TASK-010`–`TASK-012` may be separate branches after `TASK-009`, but merge one at a time and rerun the whole smoke suite.
+- UI extraction `TASK-010`–`TASK-012` may be separate branches after `TASK-009`, but merge one at a time and rerun the whole smoke suite. Pairing exceptions above reduce disposable work only when approved specs already exist.
 - AI, Pantry and Retail phases are not parallel shortcuts around a failed Initial Build.
 
 The first implementation instruction should be exactly scoped, for example: **“Implement only TASK-001 from `docs/IMPLEMENTATION_BACKLOG.md`, open one PR, then stop.”**
