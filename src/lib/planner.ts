@@ -203,12 +203,16 @@ export function banDish(state: AppState, dishId: string): AppState {
 
 export function buildShoppingList(state: AppState): ShoppingItem[] {
   const dishMap = byId(state.dishes);
-  const requested = new Map<string, { item: ShoppingItem; quantity: NormalizedQuantity }>();
+  const requested = new Map<string, { item: ShoppingItem; quantity?: NormalizedQuantity }>();
   const available = new Map<string, NormalizedQuantity[]>();
 
+  // Only confirmed, dimensioned inventory may reduce a requirement. Leftovers and
+  // freezer entries currently carry qualitative text, so treating either as `1`
+  // would invent a quantity and is intentionally conservative until their model
+  // gains an explicit compatible quantity.
   state.inventory.forEach((item) => {
     const parsed = parseQuantity({ amount: item.amount, unit: item.unit });
-    if (parsed.status !== "ok") return;
+    if (parsed.status !== "ok" || parsed.quantity.unresolved) return;
     const key = item.product.toLowerCase();
     const entries = available.get(key) ?? [];
     const existing = entries.find((entry) => quantityGroupKey(entry) === quantityGroupKey(parsed.quantity));
@@ -221,13 +225,46 @@ export function buildShoppingList(state: AppState): ShoppingItem[] {
 
   state.meals.forEach((meal) => meal.components.forEach((component) => {
     const dish = dishMap.get(component.dishId);
-    dish?.ingredients.forEach((ingredient) => {
+    dish?.ingredients.forEach((ingredient, ingredientIndex) => {
       const parsed = parseQuantity({ amount: ingredient.amount, unit: ingredient.unit, rawQuantity: ingredient.rawQuantity });
-      if (parsed.status !== "ok") return;
       const productKey = ingredient.name.toLowerCase();
+      if (parsed.status === "unresolved") {
+        const key = `${productKey}:unresolved:${meal.id}:${component.slot}:${ingredientIndex}`;
+        requested.set(key, {
+          item: {
+            id: `shop-${key}`,
+            product: ingredient.name,
+            amount: 0,
+            unit: ingredient.unit.trim(),
+            category: ingredient.category,
+            checked: false,
+            alreadyAtHome: false,
+            quantityStatus: "unresolved",
+            rawQuantity: ingredient.rawQuantity,
+          },
+        });
+        return;
+      }
+      if (parsed.quantity.unresolved) {
+        const key = `${productKey}:unresolved:${meal.id}:${component.slot}:${ingredientIndex}`;
+        requested.set(key, {
+          item: {
+            id: `shop-${key}`,
+            product: ingredient.name,
+            amount: parsed.quantity.amount,
+            unit: parsed.quantity.unit,
+            category: ingredient.category,
+            checked: false,
+            alreadyAtHome: false,
+            quantityStatus: "unresolved",
+            rawQuantity: ingredient.rawQuantity ?? String(ingredient.amount),
+          },
+        });
+        return;
+      }
       const key = `${productKey}:${quantityGroupKey(parsed.quantity)}`;
       const existing = requested.get(key);
-      if (existing) {
+      if (existing?.quantity) {
         const combined = combineQuantities(existing.quantity, parsed.quantity);
         if (combined) {
           existing.quantity = combined;
@@ -256,11 +293,12 @@ export function buildShoppingList(state: AppState): ShoppingItem[] {
 
   return Array.from(requested.values())
     .map<ShoppingItem>(({ item, quantity }) => {
+      if (!quantity) return item;
       const inStock = available.get(item.product.toLowerCase())?.find((entry) => quantityGroupKey(entry) === quantityGroupKey(quantity));
       const remaining = inStock ? subtractQuantities(quantity, inStock) ?? quantity : quantity;
       return { ...item, amount: remaining.amount, unit: remaining.unit, quantityStatus: remaining.unresolved ? "unresolved" : undefined };
     })
-    .filter((item) => item.amount > 0)
+    .filter((item) => item.quantityStatus === "unresolved" || item.amount > 0)
     .sort((a, b) => a.category.localeCompare(b.category, "ru") || a.product.localeCompare(b.product, "ru"));
 }
 

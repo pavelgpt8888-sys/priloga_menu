@@ -56,4 +56,8 @@ describe("quantity parsing and normalization", () => {
   it("shows preserved raw quantity text for unresolved recipe input", () => {
     expect(formatIngredientQuantity({ amount: 0, unit: "ложка", rawQuantity: "примерно две", quantityStatus: "unresolved" })).toBe("примерно две ложка");
   });
+
+  it("asks for clarification when unresolved quantity has no usable raw value", () => {
+    expect(formatIngredientQuantity({ amount: 0, unit: "", rawQuantity: "", quantityStatus: "unresolved" })).toBe("Уточнить количество");
+  });
 });

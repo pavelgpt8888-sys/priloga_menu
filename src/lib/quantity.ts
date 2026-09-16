@@ -113,6 +113,12 @@ export function formatQuantity(quantity: Pick<NormalizedQuantity, "amount" | "un
 }
 
 export function formatIngredientQuantity(input: { amount: number; unit: string; rawQuantity?: string; quantityStatus?: "unresolved" }) {
-  if (input.quantityStatus === "unresolved" && input.rawQuantity) return [input.rawQuantity, input.unit].filter(Boolean).join(" ");
+  if (input.quantityStatus === "unresolved") {
+    const raw = input.rawQuantity?.trim() ?? "";
+    const unit = input.unit.trim();
+    if (!raw) return "Уточнить количество";
+    if (!unit || raw.toLowerCase().endsWith(unit.toLowerCase())) return raw;
+    return `${raw} ${unit}`;
+  }
   return formatQuantity(input);
 }
