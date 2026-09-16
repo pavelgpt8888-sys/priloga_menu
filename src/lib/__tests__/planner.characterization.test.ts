@@ -77,15 +77,15 @@ describe("known current defects", () => {
     ]));
   });
 
-  it("current behavior: replacement recalculation drops manual and checked shopping state", () => {
+  it("preserves manual and checked shopping state during replacement recalculation", () => {
     const state = manualAndCheckedShoppingState();
     const meal = state.meals.find((item) => item.kind === "dinner");
     if (!meal) throw new Error("Fixture requires a dinner");
 
     const next = replaceComponent(state, meal.id, "main");
 
-    expect(next.shopping.find((item) => item.id === "fixture-manual")).toBeUndefined();
-    expect(next.shopping.find((item) => item.id === "fixture-checked")).toBeUndefined();
+    expect(next.shopping.find((item) => item.id === "fixture-manual")).toEqual(state.shopping.find((item) => item.id === "fixture-manual"));
+    expect(next.shopping.find((item) => item.id === "fixture-checked")).toEqual(state.shopping.find((item) => item.id === "fixture-checked"));
   });
 
   it("current behavior: recipe shopping mutates the nested item that Undo would snapshot", () => {

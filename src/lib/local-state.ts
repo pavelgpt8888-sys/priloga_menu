@@ -8,6 +8,7 @@ export function seededState(): AppState {
 }
 
 export function hydrateState(value: AppState): AppState {
+  const hasStoredShopping = Array.isArray(value.shopping);
   const storedRecipes = Array.isArray(value.recipes) ? value.recipes : [];
   const usableRecipes = storedRecipes.filter((recipe): recipe is RecipeEntry => {
     const maybeRecipe = recipe as Partial<RecipeEntry>;
@@ -39,9 +40,6 @@ export function hydrateState(value: AppState): AppState {
   const meals = [...savedMeals, ...missingLunches].sort((first, second) =>
     first.date.localeCompare(second.date) || order.indexOf(first.kind) - order.indexOf(second.kind),
   );
-  const manualShopping = hydrated.shopping.filter((item) => item.manuallyAdded);
-  const shopping = missingLunches.length
-    ? [...buildShoppingList({ ...hydrated, meals }), ...manualShopping]
-    : hydrated.shopping.length ? hydrated.shopping : buildShoppingList({ ...hydrated, meals });
+  const shopping = hasStoredShopping ? hydrated.shopping : buildShoppingList({ ...hydrated, meals });
   return { ...hydrated, meals, shopping };
 }
