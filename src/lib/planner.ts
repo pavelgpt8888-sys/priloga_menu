@@ -1,4 +1,5 @@
 import type { AppState, DishComponent, DishRole, MealComponent, MealKind, MealPlan, RecipeEntry, ShoppingItem, StoragePlace } from "./types";
+import { combineQuantities, parseQuantity, quantityGroupKey, subtractQuantities, type NormalizedQuantity } from "./quantity";
 
 const dayMs = 24 * 60 * 60 * 1000;
 const iso = (date: Date) => date.toISOString().slice(0, 10);
@@ -202,25 +203,102 @@ export function banDish(state: AppState, dishId: string): AppState {
 
 export function buildShoppingList(state: AppState): ShoppingItem[] {
   const dishMap = byId(state.dishes);
-  const requested = new Map<string, ShoppingItem>();
-  const available = new Map<string, number>();
-  [...state.inventory.map((item) => ({ name: item.product, amount: item.amount })), ...state.leftovers.map((item) => ({ name: item.name, amount: 1 })), ...state.freezer.map((item) => ({ name: item.name, amount: 1 }))].forEach((item) => {
-    available.set(item.name.toLowerCase(), (available.get(item.name.toLowerCase()) ?? 0) + item.amount);
+  const requested = new Map<string, { item: ShoppingItem; quantity?: NormalizedQuantity }>();
+  const available = new Map<string, NormalizedQuantity[]>();
+
+  // Only confirmed, dimensioned inventory may reduce a requirement. Leftovers and
+  // freezer entries currently carry qualitative text, so treating either as `1`
+  // would invent a quantity and is intentionally conservative until their model
+  // gains an explicit compatible quantity.
+  state.inventory.forEach((item) => {
+    const parsed = parseQuantity({ amount: item.amount, unit: item.unit });
+    if (parsed.status !== "ok" || parsed.quantity.unresolved) return;
+    const key = item.product.toLowerCase();
+    const entries = available.get(key) ?? [];
+    const existing = entries.find((entry) => quantityGroupKey(entry) === quantityGroupKey(parsed.quantity));
+    if (existing) {
+      const combined = combineQuantities(existing, parsed.quantity);
+      if (combined) entries[entries.indexOf(existing)] = combined;
+    } else entries.push(parsed.quantity);
+    available.set(key, entries);
   });
 
   state.meals.forEach((meal) => meal.components.forEach((component) => {
     const dish = dishMap.get(component.dishId);
-    dish?.ingredients.forEach((ingredient) => {
-      const key = ingredient.name.toLowerCase();
+    dish?.ingredients.forEach((ingredient, ingredientIndex) => {
+      const parsed = parseQuantity({ amount: ingredient.amount, unit: ingredient.unit, rawQuantity: ingredient.rawQuantity });
+      const productKey = ingredient.name.toLowerCase();
+      if (parsed.status === "unresolved") {
+        const key = `${productKey}:unresolved:${meal.id}:${component.slot}:${ingredientIndex}`;
+        requested.set(key, {
+          item: {
+            id: `shop-${key}`,
+            product: ingredient.name,
+            amount: 0,
+            unit: ingredient.unit.trim(),
+            category: ingredient.category,
+            checked: false,
+            alreadyAtHome: false,
+            quantityStatus: "unresolved",
+            rawQuantity: ingredient.rawQuantity,
+          },
+        });
+        return;
+      }
+      if (parsed.quantity.unresolved) {
+        const key = `${productKey}:unresolved:${meal.id}:${component.slot}:${ingredientIndex}`;
+        requested.set(key, {
+          item: {
+            id: `shop-${key}`,
+            product: ingredient.name,
+            amount: parsed.quantity.amount,
+            unit: parsed.quantity.unit,
+            category: ingredient.category,
+            checked: false,
+            alreadyAtHome: false,
+            quantityStatus: "unresolved",
+            rawQuantity: ingredient.rawQuantity ?? String(ingredient.amount),
+          },
+        });
+        return;
+      }
+      const key = `${productKey}:${quantityGroupKey(parsed.quantity)}`;
       const existing = requested.get(key);
-      if (existing) existing.amount += ingredient.amount;
-      else requested.set(key, { id: `shop-${key}`, product: ingredient.name, amount: ingredient.amount, unit: ingredient.unit, category: ingredient.category, checked: false, alreadyAtHome: false });
+      if (existing?.quantity) {
+        const combined = combineQuantities(existing.quantity, parsed.quantity);
+        if (combined) {
+          existing.quantity = combined;
+          existing.item.amount = combined.amount;
+          existing.item.unit = combined.unit;
+          existing.item.quantityStatus = combined.unresolved ? "unresolved" : undefined;
+        }
+      } else {
+        requested.set(key, {
+          quantity: parsed.quantity,
+          item: {
+            id: `shop-${productKey}-${quantityGroupKey(parsed.quantity)}`,
+            product: ingredient.name,
+            amount: parsed.quantity.amount,
+            unit: parsed.quantity.unit,
+            category: ingredient.category,
+            checked: false,
+            alreadyAtHome: false,
+            quantityStatus: parsed.quantity.unresolved ? "unresolved" : undefined,
+            rawQuantity: parsed.quantity.unresolved ? ingredient.rawQuantity : undefined,
+          },
+        });
+      }
     });
   }));
 
   return Array.from(requested.values())
-    .map((item) => ({ ...item, amount: Math.max(0, item.amount - (available.get(item.product.toLowerCase()) ?? 0)) }))
-    .filter((item) => item.amount > 0)
+    .map<ShoppingItem>(({ item, quantity }) => {
+      if (!quantity) return item;
+      const inStock = available.get(item.product.toLowerCase())?.find((entry) => quantityGroupKey(entry) === quantityGroupKey(quantity));
+      const remaining = inStock ? subtractQuantities(quantity, inStock) ?? quantity : quantity;
+      return { ...item, amount: remaining.amount, unit: remaining.unit, quantityStatus: remaining.unresolved ? "unresolved" : undefined };
+    })
+    .filter((item) => item.quantityStatus === "unresolved" || item.amount > 0)
     .sort((a, b) => a.category.localeCompare(b.category, "ru") || a.product.localeCompare(b.product, "ru"));
 }
 
@@ -353,7 +431,10 @@ function storagePlaceForShoppingItem(item: ShoppingItem): StoragePlace {
 }
 
 export function moveCheckedShoppingToInventory(state: AppState): AppState {
-  const checked = state.shopping.filter((item) => item.checked && !item.alreadyAtHome);
+  // An unresolved row means that the product is needed but its quantity is not
+  // confirmed. Ignore stale/manual `checked` flags until a later task supplies
+  // a resolved quantity; never turn the sentinel amount into inventory.
+  const checked = state.shopping.filter((item) => item.checked && !item.alreadyAtHome && item.quantityStatus !== "unresolved");
   if (!checked.length) return state;
   const inventory = [...state.inventory];
 
@@ -375,7 +456,7 @@ export function moveCheckedShoppingToInventory(state: AppState): AppState {
     });
   });
 
-  return { ...state, inventory, shopping: state.shopping.filter((item) => !item.checked) };
+  return { ...state, inventory, shopping: state.shopping.filter((item) => !item.checked || item.quantityStatus === "unresolved") };
 }
 
 function slotForDishRole(roleToUse: DishRole): MealComponent["slot"] {

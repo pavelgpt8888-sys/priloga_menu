@@ -14,14 +14,14 @@ export interface FamilyMember {
   restrictions?: string[];
   notes?: string;
 }
-export interface IngredientNeed { name: string; amount: number; unit: string; category: ShoppingCategory; }
+export interface IngredientNeed { name: string; amount: number; unit: string; category: ShoppingCategory; rawQuantity?: string; quantityStatus?: "unresolved"; }
 export interface DishComponent { id: string; name: string; role: DishRole; effort: "easy" | "medium" | "weekend"; cost: "low" | "medium" | "high"; kidsFriendly: boolean; leftoverFriendly?: boolean; freezerFriendly?: boolean; sweetPastry?: boolean; ingredients: IngredientNeed[]; steps?: string[]; }
 export interface MealComponent { slot: "base" | "addon" | "drink" | "main" | "side" | "salad" | "kidsVegetables" | "soup" | "dessert"; dishId: string; }
 export interface MealPlan { id: string; date: string; kind: MealKind; title: string; components: MealComponent[]; notes?: string; source?: "generated" | "manual"; }
 export interface InventoryItem { id: string; product: string; amount: number; unit: string; category: ShoppingCategory; place: StoragePlace; expiresAt?: string; urgent?: boolean; source: "manual" | "shopping" | "future_ai_photo"; }
 export interface Leftover { id: string; name: string; amount: "мало" | "на 1 порцию" | "на 2 порции" | "много"; cookedAt: string; useBy: string; transformInto: string[]; linkedDishIds?: string[]; }
 export interface FreezerItem { id: string; name: string; amount: string; frozenAt: string; useBy: string; serveWith: string[]; linkedDishIds?: string[]; }
-export interface ShoppingItem { id: string; product: string; amount: number; unit: string; category: ShoppingCategory; checked: boolean; alreadyAtHome: boolean; manuallyAdded?: boolean; }
+export interface ShoppingItem { id: string; product: string; amount: number; unit: string; category: ShoppingCategory; checked: boolean; alreadyAtHome: boolean; manuallyAdded?: boolean; rawQuantity?: string; quantityStatus?: "unresolved"; }
 export interface RecipeEntry {
   id: string;
   title: string;

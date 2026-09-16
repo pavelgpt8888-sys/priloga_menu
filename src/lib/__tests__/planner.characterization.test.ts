@@ -57,9 +57,9 @@ describe("current core behavior", () => {
 });
 
 describe("known current defects", () => {
-  it("current behavior: combines 1 кг and 500 г as 501 кг", () => {
+  it("aggregates 1 кг and 500 г as 1.5 кг", () => {
     expect(buildShoppingList(mixedUnitState())).toEqual([
-      expect.objectContaining({ product: "Мука", amount: 501, unit: "кг" }),
+      expect.objectContaining({ product: "Мука", amount: 1.5, unit: "кг" }),
     ]);
   });
 

@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { hydrateState, seededState } from "@/lib/local-state";
 import { addManualShoppingItem, addRecipeToNextMenu, addRecipeToShopping, applyQuickScenario, banDish, buildShoppingList, byId, estimatedPlanCost, generateWeek, mealLabel, moveCheckedShoppingToInventory, moveMealToDate, parseCommand, planDishForDate, planRecipeForMeal, removeComponent, replaceComponent, replacementOptions, replaceComponentWithDish, startOfToday, suggestDishesFromPantry, type DishSuggestion } from "@/lib/planner";
+import { formatIngredientQuantity, parseQuantity, roundQuantity } from "@/lib/quantity";
 import type { AppState, CookingSession, DishComponent, FamilyMember, FreezerItem, IngredientNeed, InventoryItem, Leftover, MealComponent, MealFeedback, MealKind, MealPlan, RecipeEntry, ShoppingCategory, ShoppingItem, StoragePlace } from "@/lib/types";
 
 const storageKey = "family-meal-planner-state-v1";
@@ -705,7 +706,7 @@ function DishesView({ state, setState, dishMap, onBan, onRecipeToMenu, onRecipeT
         <section>
           <h3 className="font-black">Ингредиенты</h3>
           <ul className="mt-2 space-y-2 text-sm">
-            {selected.ingredients.map((item) => <li key={`${selected.id}-${item.name}`} className="flex items-center justify-between gap-3 rounded-xl bg-white px-3 py-2"><span className="font-semibold">{item.name}</span><span className="text-muted-foreground">{item.amount} {item.unit}</span></li>)}
+            {selected.ingredients.map((item) => <li key={`${selected.id}-${item.name}`} className="flex items-center justify-between gap-3 rounded-xl bg-white px-3 py-2"><span className="font-semibold">{item.name}</span><span className="text-muted-foreground">{formatIngredientQuantity(item)}</span></li>)}
           </ul>
         </section>
         <section>
@@ -725,14 +726,29 @@ const textToList = (value: string) => value.split(",").map((item) => item.trim()
 const knownCategories: ShoppingCategory[] = ["овощи и фрукты", "мясо и птица", "рыба", "молочные", "хлеб", "крупы и макароны", "бакалея", "заморозка", "специи", "сладкое", "бытовое"];
 
 function ingredientsToText(items: IngredientNeed[]) {
-  return items.map((item) => `${item.name} | ${item.amount} | ${item.unit} | ${item.category}`).join("\n");
+  return items.map((item) => `${item.name} | ${item.quantityStatus === "unresolved" ? item.rawQuantity ?? "" : roundQuantity(item.amount)} | ${item.unit} | ${item.category}`).join("\n");
+}
+
+function ingredientWithQuantity(name: string, rawAmount: string, unit: string, category: ShoppingCategory): IngredientNeed {
+  const parsed = parseQuantity({ amount: rawAmount, unit, rawQuantity: rawAmount });
+  if (parsed.status === "ok") {
+    return {
+      name,
+      amount: parsed.quantity.amount,
+      unit: parsed.quantity.unit,
+      category,
+      quantityStatus: parsed.quantity.unresolved ? "unresolved" : undefined,
+      rawQuantity: parsed.quantity.unresolved ? rawAmount : undefined,
+    };
+  }
+  return { name, amount: 0, unit: unit.trim(), category, rawQuantity: rawAmount, quantityStatus: "unresolved" };
 }
 
 function textToIngredients(value: string): IngredientNeed[] {
   return value.split("\n").map((line) => {
-    const [name = "", amount = "1", unit = "шт", category = "бакалея"] = line.split("|").map((item) => item.trim());
+    const [name = "", rawAmount = "", unit = "", category = "бакалея"] = line.split("|").map((item) => item.trim());
     const safeCategory = knownCategories.includes(category as ShoppingCategory) ? category as ShoppingCategory : "бакалея";
-    return { name, amount: Number(amount.replace(",", ".")) || 1, unit: unit || "шт", category: safeCategory };
+    return ingredientWithQuantity(name, rawAmount, unit, safeCategory);
   }).filter((item) => item.name);
 }
 
@@ -752,10 +768,10 @@ function categoryForIngredient(name: string): ShoppingCategory {
 
 function ingredientFromPlainText(value: string): IngredientNeed {
   const amountMatch = value.match(/(\d+(?:[,.]\d+)?)\s*(кг|г|л|мл|шт|ст\.?\s*л\.?|ч\.?\s*л\.?|пач|банка|банки)?/i);
-  const amount = amountMatch ? Number(amountMatch[1].replace(",", ".")) || 1 : 1;
-  const unit = amountMatch?.[2]?.replace(/\s+/g, " ") ?? "шт";
+  const rawAmount = amountMatch?.[1] ?? "";
+  const unit = amountMatch?.[2]?.replace(/\s+/g, " ") ?? "";
   const name = value.replace(amountMatch?.[0] ?? "", "").replace(/^[-•\s,.:]+/, "").trim() || value.trim();
-  return { name, amount, unit, category: categoryForIngredient(name) };
+  return ingredientWithQuantity(name, rawAmount, unit, categoryForIngredient(name));
 }
 
 function parseRecipeDraftText(value: string): Pick<RecipeEntry, "title" | "ingredients" | "steps"> {
@@ -1152,7 +1168,7 @@ function InventoryView({ state, setState, commit }: { state: AppState; setState:
 
 function ShoppingView({ state, setState, commit, manualProduct, setManualProduct }: { state: AppState; setState: (state: AppState) => void; commit: (next: AppState, message: string) => void; manualProduct: string; setManualProduct: (value: string) => void }) {
   const grouped = Object.groupBy(state.shopping, (item) => item.category);
-  const checkedCount = state.shopping.filter((item) => item.checked && !item.alreadyAtHome).length;
+  const checkedCount = state.shopping.filter((item) => item.checked && !item.alreadyAtHome && item.quantityStatus !== "unresolved").length;
   const update = (item: ShoppingItem, patch: Partial<ShoppingItem>) => setState({ ...state, shopping: state.shopping.map((entry) => entry.id === item.id ? { ...entry, ...patch } : entry) });
   function rebuildFor(meals: MealPlan[], label: string) {
     const manual = state.shopping.filter((item) => item.manuallyAdded);
@@ -1162,7 +1178,7 @@ function ShoppingView({ state, setState, commit, manualProduct, setManualProduct
   const weekEnd = new Date(startOfToday());
   weekEnd.setDate(weekEnd.getDate() + 6);
   const weekEndIso = weekEnd.toISOString().slice(0, 10);
-  return <div className="space-y-4"><Card><CardHeader className="space-y-3"><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><CardTitle>Общий список покупок</CardTitle><p className="text-sm text-muted-foreground">Как в Plan to Eat: создайте список из выбранного периода меню, а купленное перенесите в запасы.</p></div><Button variant="soft" disabled={!checkedCount} onClick={() => commit(moveCheckedShoppingToInventory(state), `Купленное перенесено в запасы: ${checkedCount} поз.`)}>Купленное в запасы</Button></div><div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" onClick={() => rebuildFor(state.meals.filter((meal) => meal.date === today), "сегодня")}>Из меню сегодня</Button><Button variant="outline" size="sm" onClick={() => rebuildFor(state.meals.filter((meal) => meal.date >= today && meal.date <= weekEndIso), "7 дней")}>Из меню на 7 дней</Button><Button variant="outline" size="sm" onClick={() => rebuildFor(state.meals, "все запланированное")}>Из всего меню</Button></div></CardHeader></Card><form className="flex gap-2" onSubmit={(event) => { event.preventDefault(); commit(addManualShoppingItem(state, manualProduct), "Добавили вручную в покупки."); setManualProduct(""); }}><Input value={manualProduct} onChange={(event) => setManualProduct(event.target.value)} placeholder="Добавить вручную: молоко, хлеб, салфетки" /><Button>Добавить</Button></form>{Object.entries(grouped).map(([category, items]) => <Card key={category}><CardHeader><CardTitle>{category}</CardTitle></CardHeader><CardContent className="space-y-2">{items?.map((item) => <div key={item.id} className="flex flex-col gap-3 rounded-xl bg-white p-3 sm:flex-row sm:items-center sm:justify-between"><label className="flex items-center gap-3 font-semibold"><input type="checkbox" checked={item.checked} onChange={(event) => update(item, { checked: event.target.checked })} />{item.product} · {item.amount} {item.unit}</label><div className="flex flex-wrap gap-2"><Button variant="ghost" size="sm" onClick={() => update(item, { alreadyAtHome: !item.alreadyAtHome })}>{item.alreadyAtHome ? "Уже есть" : "Есть дома"}</Button><Button variant="ghost" size="sm" onClick={() => update(item, { amount: Math.max(0.5, item.amount - 1) })}>Меньше</Button><Button variant="ghost" size="sm" onClick={() => update(item, { amount: item.amount + 1 })}>Больше</Button><Button variant="danger" size="sm" onClick={() => setState({ ...state, shopping: state.shopping.filter((entry) => entry.id !== item.id) })}>Удалить</Button></div></div>)}</CardContent></Card>)}</div>;
+  return <div className="space-y-4"><Card><CardHeader className="space-y-3"><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><CardTitle>Общий список покупок</CardTitle><p className="text-sm text-muted-foreground">Как в Plan to Eat: создайте список из выбранного периода меню, а купленное перенесите в запасы.</p></div><Button variant="soft" disabled={!checkedCount} onClick={() => commit(moveCheckedShoppingToInventory(state), `Купленное перенесено в запасы: ${checkedCount} поз.`)}>Купленное в запасы</Button></div><div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" onClick={() => rebuildFor(state.meals.filter((meal) => meal.date === today), "сегодня")}>Из меню сегодня</Button><Button variant="outline" size="sm" onClick={() => rebuildFor(state.meals.filter((meal) => meal.date >= today && meal.date <= weekEndIso), "7 дней")}>Из меню на 7 дней</Button><Button variant="outline" size="sm" onClick={() => rebuildFor(state.meals, "все запланированное")}>Из всего меню</Button></div></CardHeader></Card><form className="flex gap-2" onSubmit={(event) => { event.preventDefault(); commit(addManualShoppingItem(state, manualProduct), "Добавили вручную в покупки."); setManualProduct(""); }}><Input value={manualProduct} onChange={(event) => setManualProduct(event.target.value)} placeholder="Добавить вручную: молоко, хлеб, салфетки" /><Button>Добавить</Button></form>{Object.entries(grouped).map(([category, items]) => <Card key={category}><CardHeader><CardTitle>{category}</CardTitle></CardHeader><CardContent className="space-y-2">{items?.map((item) => { const unresolved = item.quantityStatus === "unresolved"; return <div key={item.id} className="flex flex-col gap-3 rounded-xl bg-white p-3 sm:flex-row sm:items-center sm:justify-between"><label className="flex items-center gap-3 font-semibold"><input type="checkbox" checked={unresolved ? false : item.checked} disabled={unresolved} aria-label={unresolved ? `${item.product}: сначала уточните количество` : `${item.product}: куплено`} onChange={(event) => update(item, { checked: event.target.checked })} /><span>{item.product} · {formatIngredientQuantity(item)}</span>{unresolved && <span className="rounded-full bg-[#fff1c9] px-2 py-1 text-xs font-bold text-[#6f4b16]">Уточнить количество</span>}</label><div className="flex flex-wrap gap-2"><Button variant="ghost" size="sm" onClick={() => update(item, { alreadyAtHome: !item.alreadyAtHome })}>{item.alreadyAtHome ? "Уже есть" : "Есть дома"}</Button><Button variant="ghost" size="sm" disabled={unresolved} onClick={() => update(item, { amount: Math.max(0.5, item.amount - 1) })}>Меньше</Button><Button variant="ghost" size="sm" disabled={unresolved} onClick={() => update(item, { amount: item.amount + 1 })}>Больше</Button><Button variant="danger" size="sm" onClick={() => setState({ ...state, shopping: state.shopping.filter((entry) => entry.id !== item.id) })}>Удалить</Button></div></div>; })}</CardContent></Card>)}</div>;
 }
 
 function SettingsView({ reset, onNavigate }: { reset: () => void; onNavigate: (section: (typeof sections)[number][0]) => void }) { return <div className="grid gap-4 xl:grid-cols-2"><Card><CardHeader><CardTitle>Настройки MVP</CardTitle></CardHeader><CardContent className="space-y-3"><p className="text-muted-foreground">Данные хранятся локально в браузере. Синхронизацию между семьями подключим через облачную базу на следующем этапе.</p><Button variant="outline" onClick={reset}>Сбросить демо-данные</Button></CardContent></Card><Card><CardHeader><CardTitle>Вкусы и ограничения</CardTitle></CardHeader><CardContent className="space-y-3"><p className="text-sm text-muted-foreground">Любимые блюда, запреты и заметки уже редактируются в профилях семьи и влияют на новое меню.</p><Button variant="soft" onClick={() => onNavigate("Семья")}><Users size={16} />Открыть профили семьи</Button></CardContent></Card><Card><CardHeader><CardTitle>Импорт рецепта</CardTitle></CardHeader><CardContent className="space-y-3"><p className="text-sm text-muted-foreground">В разделе «Блюда» работает ручной рецепт и черновик из вставленного текста со снимка. Настоящее распознавание изображения подключим вместе с AI.</p><Button variant="soft" onClick={() => onNavigate("Блюда")}><Camera size={16} />Открыть рецепты и импорт</Button><Button variant="outline" disabled><Sparkles size={16} />AI-распознавание: позже</Button></CardContent></Card></div>; }
@@ -1181,7 +1197,7 @@ function ShoppingPreview({ items, onOpen }: { items: ShoppingItem[]; onOpen: () 
       {visible.length ? <ul className="space-y-2 text-sm text-[#40504A]">
         {visible.map((item) => <li key={item.id} className="flex items-center justify-between gap-3 rounded-xl bg-[#fffdf6]/85 px-3 py-2">
           <span className="font-semibold">{item.product}</span>
-          <span className="text-[#5F6B66]">{item.amount} {item.unit}</span>
+          <span className="text-right text-[#5F6B66]">{formatIngredientQuantity(item)}{item.quantityStatus === "unresolved" && <span className="block text-xs font-bold text-[#6f4b16]">Уточнить количество</span>}</span>
         </li>)}
       </ul> : <p className="rounded-xl bg-[#fffdf6]/85 p-3 text-sm text-[#5F6B66]">Пока все есть дома или список пуст.</p>}
       {items.length > visible.length ? <p className="mt-3 text-sm font-semibold text-[#4F7C5D]">Еще позиций: {items.length - visible.length}</p> : null}
