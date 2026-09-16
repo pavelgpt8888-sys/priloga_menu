@@ -18,6 +18,33 @@ Bring! is a reference for interaction quality and native feeling, not a template
 
 Mobbin is a research library for mature mobile patterns across food, shopping, family and productivity apps.
 
+### Source-of-truth rule
+
+- `origin/main` and the deployed application remain the source of truth for existing functionality and working UX.
+- `origin/design/three-ui-concepts` at `0969a865e22ae6c3459c94b5fdbef26fd7a73271` is a **design reference only**. It is not merged, and its code must not be copied into production without a separate approved task.
+- A2 is the preferred interaction direction among the explored concepts; it is not an approved final screen specification.
+- If A2 omits or contradicts a current workflow, the workflow is preserved until an explicit product decision replaces it.
+
+### What the A2/Tomato review actually established
+
+Accepted direction:
+
+- Today is one concrete selected date, with breakfast → lunch → dinner visible in that order;
+- the current/next meal may receive stronger emphasis;
+- Shopping and “at home / needs checking” are supporting context below the meals, not a dashboard competing with them;
+- mobile top-level navigation is provisionally Today / Menu / Shopping / More;
+- Tomato is the preferred color experiment and should remain a configurable token set while typography, density and layout are tested.
+
+Not accepted as final:
+
+- A2 currently defaults to the Terracotta palette in code; Tomato is only one switchable variant;
+- the prototype still uses many rounded cards, pills, emoji and a large gradient meal card—the same traits later research asks us to reduce;
+- the day buttons change only selection styling in the prototype; meal content is static, so the prototype does not specify real date/state behavior;
+- shopping tiles and checkmarks are demonstration-local state and do not define production reconciliation rules;
+- typography, list-vs-card density, navigation detail, contextual actions, accessibility states and desktop adaptation remain open.
+
+Therefore implementation must start from approved user jobs and state transitions, then use A2 as visual/interaction evidence—not transplant its component tree.
+
 ## 2. What “AI-generated UI” means here
 
 Avoid common visual symptoms:
@@ -260,3 +287,20 @@ Before implementing a screen, define:
 - what NOT to show.
 
 Codex should implement an approved screen spec, not invent the product hierarchy itself.
+
+## 11. Separate decisions still awaiting approval
+
+This document is a direction brief, not a signed-off design system. Each item below needs its own approved mini-spec before redesign work:
+
+- Today information hierarchy, emphasis and contextual actions;
+- Menu/Week calendar density, local actions and plan states;
+- Shopping list-vs-tile choice, grouping, quick add and completed state;
+- Recipe/Dish content hierarchy and actions;
+- Family onboarding/profile editing;
+- More/Kitchen composition, including Leftovers, Freezer and future Smart Pantry;
+- typography family, scale and weights;
+- page/list density and spacing rhythm;
+- exact mobile/desktop navigation behavior;
+- reusable components and empty/loading/error/offline/disabled states.
+
+A2/Tomato remains provisional evidence while these are open. Codex may prepare alternatives or implement an approved spec, but must not close these product decisions itself.
