@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { hydrateState, seededState } from "@/lib/local-state";
-import { addManualShoppingItem, addRecipeToNextMenuResult, addRecipeToShopping, applyQuickScenario, banDish, buildShoppingList, byId, estimatedPlanCost, generateWeekResult, mealLabel, moveCheckedShoppingToInventory, moveMealToDateResult, parseCommand, planDishForDateResult, planRecipeForMealResult, removeComponent, repeatMealResult, replaceComponentResult, replacementOptions, replaceComponentWithDishResult, startOfToday, suggestDishesFromPantry, type DishSuggestion, type MenuMutationResult } from "@/lib/planner";
+import { addManualShoppingItem, addRecipeToNextMenuResult, addRecipeToShopping, applyQuickScenario, banDish, byId, estimatedPlanCost, generateWeekResult, mealLabel, moveCheckedShoppingToInventory, moveMealToDateResult, parseCommand, planDishForDateResult, planRecipeForMealResult, recalculateShoppingList, removeComponent, repeatMealResult, replaceComponentResult, replacementOptions, replaceComponentWithDishResult, startOfToday, suggestDishesFromPantry, type DishSuggestion, type MenuMutationResult } from "@/lib/planner";
 import { formatIngredientQuantity, parseQuantity, roundQuantity } from "@/lib/quantity";
 import type { AppState, CookingSession, DishComponent, FamilyMember, FreezerItem, IngredientNeed, InventoryItem, Leftover, MealComponent, MealFeedback, MealKind, MealPlan, RecipeEntry, ShoppingCategory, ShoppingItem, StoragePlace } from "@/lib/types";
 
@@ -76,8 +76,7 @@ export default function HomePage() {
 
   function commit(next: AppState, message: string) {
     setUndo(state);
-    const withShopping = { ...next, shopping: next.shopping.length ? next.shopping : buildShoppingList(next) };
-    setState(withShopping);
+    setState(next);
     setToast(message);
   }
 
@@ -97,7 +96,7 @@ export default function HomePage() {
 
   function regenerate(mode: Parameters<typeof generateWeekResult>[1] = "balanced") {
     const result = generateWeekResult(state, mode);
-    const next = { ...state, meals: result.meals, shopping: buildShoppingList({ ...state, meals: result.meals }) };
+    const next = { ...state, meals: result.meals, shopping: recalculateShoppingList(state, result.meals) };
     commit(next, result.status === "blocked" ? "Меню создано частично: небезопасные слоты оставлены пустыми." : "Меню на неделю пересобрано.");
   }
 
@@ -107,7 +106,7 @@ export default function HomePage() {
       setToast(result.message);
       return;
     }
-    commit({ ...result.state, shopping: buildShoppingList(result.state) }, result.message);
+    commit(result.state, result.message);
   }
 
   function handleCommand(event: FormEvent) {
@@ -118,7 +117,7 @@ export default function HomePage() {
       setCommand("");
       return;
     }
-    commit({ ...result.state, shopping: buildShoppingList(result.state) }, result.message);
+    commit(result.state, result.message);
     setCommand("");
   }
 
@@ -1192,8 +1191,7 @@ function ShoppingView({ state, setState, commit, manualProduct, setManualProduct
   const checkedCount = state.shopping.filter((item) => item.checked && !item.alreadyAtHome && item.quantityStatus !== "unresolved").length;
   const update = (item: ShoppingItem, patch: Partial<ShoppingItem>) => setState({ ...state, shopping: state.shopping.map((entry) => entry.id === item.id ? { ...entry, ...patch } : entry) });
   function rebuildFor(meals: MealPlan[], label: string) {
-    const manual = state.shopping.filter((item) => item.manuallyAdded);
-    commit({ ...state, shopping: [...buildShoppingList({ ...state, meals }), ...manual] }, `Список покупок пересчитан: ${label}.`);
+    commit({ ...state, shopping: recalculateShoppingList(state, meals, { preserveEmpty: false }) }, `Список покупок пересчитан: ${label}.`);
   }
   const today = startOfToday().toISOString().slice(0, 10);
   const weekEnd = new Date(startOfToday());

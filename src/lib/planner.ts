@@ -1,6 +1,7 @@
 import type { AppState, DishComponent, DishRole, MealComponent, MealKind, MealPlan, RecipeEntry, ShoppingItem, StoragePlace } from "./types";
 import { combineQuantities, parseQuantity, quantityGroupKey, subtractQuantities, type NormalizedQuantity } from "./quantity";
 import { safeDishes, validateDishRestrictions, type RestrictionBlockReason, type RestrictionIssue } from "./restrictions";
+import { reconcileShoppingList } from "./shopping";
 
 const dayMs = 24 * 60 * 60 * 1000;
 const iso = (date: Date) => date.toISOString().slice(0, 10);
@@ -238,7 +239,7 @@ export function replaceComponentResult(state: AppState, mealId: string, slot: Me
     return { ...meal, components: meal.components.map((component) => component.slot === slot ? { ...component, dishId: next.id } : component) };
   });
   if (missingSafeCandidate) return blockedMutation(state, "no_safe_candidate");
-  return { status: "applied", state: { ...state, meals, shopping: buildShoppingList({ ...state, meals }) } };
+  return { status: "applied", state: { ...state, meals, shopping: recalculateShoppingList(state, meals) } };
 }
 
 export function replaceComponent(state: AppState, mealId: string, slot: MealComponent["slot"], prefer?: DishRole): AppState {
@@ -274,7 +275,7 @@ export function replaceComponentWithDishResult(state: AppState, mealId: string, 
     ...meal,
     components: meal.components.map((component) => component.slot === slot ? { ...component, dishId } : component),
   } : meal);
-  return { status: "applied", state: { ...state, meals, shopping: buildShoppingList({ ...state, meals }) } };
+  return { status: "applied", state: { ...state, meals, shopping: recalculateShoppingList(state, meals) } };
 }
 
 export function replaceComponentWithDish(state: AppState, mealId: string, slot: MealComponent["slot"], dishId: string): AppState {
@@ -283,7 +284,7 @@ export function replaceComponentWithDish(state: AppState, mealId: string, slot: 
 
 export function removeComponent(state: AppState, mealId: string, slot: MealComponent["slot"]): AppState {
   const meals = state.meals.map((meal) => meal.id === mealId ? { ...meal, components: meal.components.filter((component) => component.slot !== slot) } : meal);
-  return { ...state, meals, shopping: buildShoppingList({ ...state, meals }) };
+  return { ...state, meals, shopping: recalculateShoppingList(state, meals) };
 }
 
 export function banDish(state: AppState, dishId: string): AppState {
@@ -391,6 +392,23 @@ export function buildShoppingList(state: AppState): ShoppingItem[] {
     .sort((a, b) => a.category.localeCompare(b.category, "ru") || a.product.localeCompare(b.product, "ru"));
 }
 
+export interface ShoppingRecalculationOptions {
+  preserveEmpty?: boolean;
+}
+
+function reconcileDerivedShoppingList(state: AppState, derived: ShoppingItem[], options: ShoppingRecalculationOptions = {}): ShoppingItem[] {
+  if ((options.preserveEmpty ?? true) && state.shopping.length === 0) return [];
+  return reconcileShoppingList(derived, state.shopping);
+}
+
+export function recalculateShoppingList(
+  state: AppState,
+  meals: MealPlan[] = state.meals,
+  options: ShoppingRecalculationOptions = {},
+): ShoppingItem[] {
+  return reconcileDerivedShoppingList(state, buildShoppingList({ ...state, meals }), options);
+}
+
 export interface DishSuggestion {
   dish: DishComponent;
   matchedIngredients: string[];
@@ -483,7 +501,7 @@ export function planDishForDateResult(state: AppState, dishId: string, date: str
       notes: `${mealLabel(kind)} подобран из домашних запасов.`,
       components: [{ slot: targetSlot, dishId }],
     }];
-  return { status: "applied", state: { ...state, meals, shopping: buildShoppingList({ ...state, meals }) } };
+  return { status: "applied", state: { ...state, meals, shopping: recalculateShoppingList(state, meals) } };
 }
 
 export function planDishForDate(state: AppState, dishId: string, date: string, kind: MealKind = "dinner"): AppState {
@@ -628,7 +646,7 @@ export function planRecipeForMealResult(state: AppState, recipe: RecipeEntry, da
     }];
   }
 
-  return { status: "applied", state: { ...prepared.state, meals, shopping: buildShoppingList({ ...prepared.state, meals }) } };
+  return { status: "applied", state: { ...prepared.state, meals, shopping: recalculateShoppingList(prepared.state, meals) } };
 }
 
 export function planRecipeForMeal(state: AppState, recipe: RecipeEntry, date: string, kind: MealKind): AppState {
@@ -644,7 +662,7 @@ export function moveMealToDateResult(state: AppState, mealId: string, date: stri
   const meals = state.meals
     .filter((meal) => meal.id === mealId || !(meal.date === date && meal.kind === mealToMove.kind))
     .map((meal) => meal.id === mealId ? { ...meal, id: movedId, date, source: "manual" as const, notes: `${mealLabel(meal.kind)} перенесен вручную.` } : meal);
-  return { status: "applied", state: { ...state, meals, shopping: buildShoppingList({ ...state, meals }) } };
+  return { status: "applied", state: { ...state, meals, shopping: recalculateShoppingList(state, meals) } };
 }
 
 export function moveMealToDate(state: AppState, mealId: string, date: string): AppState {
@@ -672,7 +690,7 @@ export function addRecipeToNextMenuResult(state: AppState, recipe: RecipeEntry):
     components: [{ slot: slotForDishRole(dish.role), dishId }],
   };
   const meals = [...state.meals, meal];
-  return { status: "applied", state: { ...state, meals, shopping: buildShoppingList({ ...state, meals }) } };
+  return { status: "applied", state: { ...state, meals, shopping: recalculateShoppingList(state, meals) } };
 }
 
 export function addRecipeToNextMenu(state: AppState, recipe: RecipeEntry): AppState {
@@ -686,12 +704,12 @@ export function repeatMealResult(state: AppState, mealId: string, date: string):
   if (blocked) return blocked;
   const copy: MealPlan = { ...meal, id: `${date}-${meal.kind}-repeat`, date, source: "manual" };
   const meals = [...state.meals, copy];
-  return { status: "applied", state: { ...state, meals, shopping: buildShoppingList({ ...state, meals }) } };
+  return { status: "applied", state: { ...state, meals, shopping: recalculateShoppingList(state, meals) } };
 }
 
 function generatedInteraction(state: AppState, mode: Parameters<typeof generateWeekResult>[1], successMessage: string): PlannerInteractionResult {
   const generated = generateWeekResult(state, mode);
-  const next = { ...state, meals: generated.meals };
+  const next = { ...state, meals: generated.meals, shopping: recalculateShoppingList(state, generated.meals) };
   if (generated.status === "blocked") {
     return { status: "blocked", state: next, reason: generated.reason, issues: [], message: "Меню создано частично: для некоторых слотов нет безопасного кандидата." };
   }
@@ -705,7 +723,7 @@ export function applyQuickScenario(state: AppState, scenario: string): PlannerIn
   if (scenario === "Из морозилки") return generatedInteraction(state, "freezer", "Добавлены варианты из морозилки.");
   if (scenario === "Дети это не едят") return { status: "applied", state: { ...state, bannedDishIds: [...state.bannedDishIds, ...state.dishes.filter((dish) => !dish.kidsFriendly).map((dish) => dish.id)] }, message: "Неподходящие детям блюда временно убраны из предложений." };
   if (scenario === "Добавить овощи") return { status: "applied", state, message: "К каждому ужину уже добавлены простые овощи детям и салат взрослым." };
-  if (scenario === "Из того, что есть") return { status: "applied", state: { ...state, shopping: buildShoppingList(state).slice(0, 6) }, message: "Список покупок сокращен с учетом запасов дома." };
+  if (scenario === "Из того, что есть") return { status: "applied", state: { ...state, shopping: reconcileDerivedShoppingList(state, buildShoppingList(state).slice(0, 6)) }, message: "Список покупок сокращен с учетом запасов дома." };
   return { status: "applied", state, message: "Сценарий применен." };
 }
 
@@ -728,7 +746,7 @@ export function parseCommand(state: AppState, text: string): PlannerInteractionR
       const dish = state.dishes.find((item) => item.id === component.dishId);
       return dish?.name.toLowerCase().includes("греч") ? { ...component, dishId: potato.id } : component;
     }) }));
-    return { status: "applied", state: { ...state, meals, shopping: buildShoppingList({ ...state, meals }) }, message: "Гречка заменена на картофельный гарнир." };
+    return { status: "applied", state: { ...state, meals, shopping: recalculateShoppingList(state, meals) }, message: "Гречка заменена на картофельный гарнир." };
   }
   return { status: "applied", state, message: "Понял как заметку. В MVP работают команды про гречку, огурцы детям, остатки картофеля, рыбу и простое меню." };
 }
