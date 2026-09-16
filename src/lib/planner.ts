@@ -431,7 +431,10 @@ function storagePlaceForShoppingItem(item: ShoppingItem): StoragePlace {
 }
 
 export function moveCheckedShoppingToInventory(state: AppState): AppState {
-  const checked = state.shopping.filter((item) => item.checked && !item.alreadyAtHome);
+  // An unresolved row means that the product is needed but its quantity is not
+  // confirmed. Ignore stale/manual `checked` flags until a later task supplies
+  // a resolved quantity; never turn the sentinel amount into inventory.
+  const checked = state.shopping.filter((item) => item.checked && !item.alreadyAtHome && item.quantityStatus !== "unresolved");
   if (!checked.length) return state;
   const inventory = [...state.inventory];
 
@@ -453,7 +456,7 @@ export function moveCheckedShoppingToInventory(state: AppState): AppState {
     });
   });
 
-  return { ...state, inventory, shopping: state.shopping.filter((item) => !item.checked) };
+  return { ...state, inventory, shopping: state.shopping.filter((item) => !item.checked || item.quantityStatus === "unresolved") };
 }
 
 function slotForDishRole(roleToUse: DishRole): MealComponent["slot"] {

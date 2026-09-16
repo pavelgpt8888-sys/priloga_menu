@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { cloneDemoState } from "../../../test/fixtures/family-state";
-import { buildShoppingList } from "../planner";
+import { buildShoppingList, moveCheckedShoppingToInventory } from "../planner";
 import { formatIngredientQuantity } from "../quantity";
 import type { AppState, IngredientNeed } from "../types";
 
@@ -84,5 +84,29 @@ describe("quantity-safe shopping requirements", () => {
     expect(buildShoppingList(state)).toEqual([
       expect.objectContaining({ product: "Мука", amount: 1, unit: "кг", quantityStatus: undefined }),
     ]);
+  });
+
+  it("keeps a checked unresolved item in shopping and out of inventory", () => {
+    const state = stateWithIngredients([], {
+      shopping: [{ id: "unresolved-rice", product: "Рис", amount: 0, unit: "кг", category: "крупы и макароны", checked: true, alreadyAtHome: false, quantityStatus: "unresolved", rawQuantity: "примерно горсть" }],
+    });
+
+    const next = moveCheckedShoppingToInventory(state);
+
+    expect(next.inventory).toEqual(state.inventory);
+    expect(next.shopping).toEqual(state.shopping);
+  });
+
+  it("still transfers a checked resolved item to inventory", () => {
+    const state = stateWithIngredients([], {
+      shopping: [{ id: "resolved-milk", product: "Молоко", amount: 1.5, unit: "л", category: "молочные", checked: true, alreadyAtHome: false }],
+    });
+
+    const next = moveCheckedShoppingToInventory(state);
+
+    expect(next.shopping).toEqual([]);
+    expect(next.inventory).toEqual(expect.arrayContaining([
+      expect.objectContaining({ product: "Молоко", amount: 1.5, unit: "л", category: "молочные", place: "fridge", source: "shopping" }),
+    ]));
   });
 });
