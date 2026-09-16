@@ -4,6 +4,8 @@ Status: 2026-09-16
 
 This roadmap separates the **final product picture** from the **initial implementation block**. The goal is speed without a rewrite.
 
+Execution note after the repository audit: this file remains the high-level product sequence. The authoritative small-PR order is `docs/MASTER_ROADMAP.md` + `docs/IMPLEMENTATION_BACKLOG.md`. In particular, `TASK-001`–`TASK-008` add regression protection and fix the four demonstrated correctness hazards (units, hard restrictions, shopping reconciliation and immutable Undo) **before** UI extraction/redesign. This corrects the earlier impression that broad componentization should be the first implementation move.
+
 ## Initial implementation block — build this first
 
 For the first working stage, **do not add**:
