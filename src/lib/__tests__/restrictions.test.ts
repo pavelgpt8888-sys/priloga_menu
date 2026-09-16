@@ -78,6 +78,40 @@ describe("hard restriction invariant", () => {
     expect(result.meals.filter((meal) => meal.kind === "dinner").every((meal) => !meal.components.some((component) => component.slot === "main"))).toBe(true);
   });
 
+  it("leaves soup empty while generating other safe slots when the soup pool is blocked", () => {
+    const base = cloneDemoState();
+    const forbiddenSoup = namedDish(base, "Гороховый суп");
+    const state = {
+      ...base,
+      family: base.family.map((member, index) => index === 0 ? { ...member, restrictions: ["горох"] } : { ...member, restrictions: [] }),
+      dishes: base.dishes.filter((dish) => dish.role !== "soup" || dish.id === forbiddenSoup.id),
+    };
+    const safeSoupIds = state.dishes
+      .filter((dish) => dish.role === "soup")
+      .filter((dish) => validateDishRestrictions(state, dish).status === "safe")
+      .map((dish) => dish.id);
+    let result: ReturnType<typeof generateWeekResult> | undefined;
+
+    expect(safeSoupIds).toEqual([]);
+    expect(() => {
+      result = generateWeekResult(state);
+    }).not.toThrow();
+    if (!result) throw new Error("Week generation did not return a result");
+
+    const lunches = result.meals.filter((meal) => meal.kind === "lunch");
+    const breakfasts = result.meals.filter((meal) => meal.kind === "breakfast");
+    const dinners = result.meals.filter((meal) => meal.kind === "dinner");
+
+    expect(result).toMatchObject({ status: "blocked", reason: "no_safe_candidate" });
+    expect(result.blockedSlots).toHaveLength(7);
+    expect(result.blockedSlots.every((slot) => slot.kind === "lunch" && slot.slot === "soup" && slot.reason === "no_safe_candidate")).toBe(true);
+    expect(lunches).toHaveLength(7);
+    expect(lunches.every((meal) => !meal.components.some((component) => component.slot === "soup"))).toBe(true);
+    expect(result.meals.flatMap((meal) => meal.components).some((component) => component.dishId === forbiddenSoup.id)).toBe(false);
+    expect(breakfasts.every((meal) => meal.components.some((component) => component.slot === "base"))).toBe(true);
+    expect(dinners.every((meal) => meal.components.some((component) => component.slot === "main"))).toBe(true);
+  });
+
   it("combines hard restrictions from multiple family members", () => {
     const base = cloneDemoState();
     const fish = namedDish(base, "Рыба запеченная");
@@ -176,7 +210,11 @@ describe("hard restriction invariant", () => {
       family: base.family.map((member, index) => index === 0 ? { ...member, restrictions: ["только проверенный производитель"] } : { ...member, restrictions: [] }),
     };
 
-    expect(validateDishRestrictions(state, chicken)).toMatchObject({ status: "unknown", reason: "restriction_needs_clarification" });
+    const validation = validateDishRestrictions(state, chicken);
+
+    expect(validation.status).toBe("unknown");
+    if (validation.status !== "unknown") throw new Error("Unknown restriction must fail closed");
+    expect(validation.reason).toBe("restriction_needs_clarification");
     expect(planDishForDateResult(state, chicken.id, "2026-01-06")).toMatchObject({ status: "blocked", reason: "restriction_needs_clarification" });
   });
 
