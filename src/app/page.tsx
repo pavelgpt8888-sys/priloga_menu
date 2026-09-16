@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { hydrateState, seededState } from "@/lib/local-state";
 import { addManualShoppingItem, addRecipeToNextMenu, addRecipeToShopping, applyQuickScenario, banDish, buildShoppingList, byId, estimatedPlanCost, generateWeek, mealLabel, moveCheckedShoppingToInventory, moveMealToDate, parseCommand, planDishForDate, planRecipeForMeal, removeComponent, replaceComponent, replacementOptions, replaceComponentWithDish, startOfToday, suggestDishesFromPantry, type DishSuggestion } from "@/lib/planner";
+import { formatIngredientQuantity, parseQuantity, roundQuantity } from "@/lib/quantity";
 import type { AppState, CookingSession, DishComponent, FamilyMember, FreezerItem, IngredientNeed, InventoryItem, Leftover, MealComponent, MealFeedback, MealKind, MealPlan, RecipeEntry, ShoppingCategory, ShoppingItem, StoragePlace } from "@/lib/types";
 
 const storageKey = "family-meal-planner-state-v1";
@@ -705,7 +706,7 @@ function DishesView({ state, setState, dishMap, onBan, onRecipeToMenu, onRecipeT
         <section>
           <h3 className="font-black">Ингредиенты</h3>
           <ul className="mt-2 space-y-2 text-sm">
-            {selected.ingredients.map((item) => <li key={`${selected.id}-${item.name}`} className="flex items-center justify-between gap-3 rounded-xl bg-white px-3 py-2"><span className="font-semibold">{item.name}</span><span className="text-muted-foreground">{item.amount} {item.unit}</span></li>)}
+            {selected.ingredients.map((item) => <li key={`${selected.id}-${item.name}`} className="flex items-center justify-between gap-3 rounded-xl bg-white px-3 py-2"><span className="font-semibold">{item.name}</span><span className="text-muted-foreground">{formatIngredientQuantity(item)}</span></li>)}
           </ul>
         </section>
         <section>
@@ -725,14 +726,29 @@ const textToList = (value: string) => value.split(",").map((item) => item.trim()
 const knownCategories: ShoppingCategory[] = ["овощи и фрукты", "мясо и птица", "рыба", "молочные", "хлеб", "крупы и макароны", "бакалея", "заморозка", "специи", "сладкое", "бытовое"];
 
 function ingredientsToText(items: IngredientNeed[]) {
-  return items.map((item) => `${item.name} | ${item.amount} | ${item.unit} | ${item.category}`).join("\n");
+  return items.map((item) => `${item.name} | ${item.quantityStatus === "unresolved" ? item.rawQuantity ?? "" : roundQuantity(item.amount)} | ${item.unit} | ${item.category}`).join("\n");
+}
+
+function ingredientWithQuantity(name: string, rawAmount: string, unit: string, category: ShoppingCategory): IngredientNeed {
+  const parsed = parseQuantity({ amount: rawAmount, unit, rawQuantity: rawAmount });
+  if (parsed.status === "ok") {
+    return {
+      name,
+      amount: parsed.quantity.amount,
+      unit: parsed.quantity.unit,
+      category,
+      quantityStatus: parsed.quantity.unresolved ? "unresolved" : undefined,
+      rawQuantity: parsed.quantity.unresolved ? rawAmount : undefined,
+    };
+  }
+  return { name, amount: 0, unit: unit.trim(), category, rawQuantity: rawAmount, quantityStatus: "unresolved" };
 }
 
 function textToIngredients(value: string): IngredientNeed[] {
   return value.split("\n").map((line) => {
-    const [name = "", amount = "1", unit = "шт", category = "бакалея"] = line.split("|").map((item) => item.trim());
+    const [name = "", rawAmount = "", unit = "", category = "бакалея"] = line.split("|").map((item) => item.trim());
     const safeCategory = knownCategories.includes(category as ShoppingCategory) ? category as ShoppingCategory : "бакалея";
-    return { name, amount: Number(amount.replace(",", ".")) || 1, unit: unit || "шт", category: safeCategory };
+    return ingredientWithQuantity(name, rawAmount, unit, safeCategory);
   }).filter((item) => item.name);
 }
 
@@ -752,10 +768,10 @@ function categoryForIngredient(name: string): ShoppingCategory {
 
 function ingredientFromPlainText(value: string): IngredientNeed {
   const amountMatch = value.match(/(\d+(?:[,.]\d+)?)\s*(кг|г|л|мл|шт|ст\.?\s*л\.?|ч\.?\s*л\.?|пач|банка|банки)?/i);
-  const amount = amountMatch ? Number(amountMatch[1].replace(",", ".")) || 1 : 1;
-  const unit = amountMatch?.[2]?.replace(/\s+/g, " ") ?? "шт";
+  const rawAmount = amountMatch?.[1] ?? "";
+  const unit = amountMatch?.[2]?.replace(/\s+/g, " ") ?? "";
   const name = value.replace(amountMatch?.[0] ?? "", "").replace(/^[-•\s,.:]+/, "").trim() || value.trim();
-  return { name, amount, unit, category: categoryForIngredient(name) };
+  return ingredientWithQuantity(name, rawAmount, unit, categoryForIngredient(name));
 }
 
 function parseRecipeDraftText(value: string): Pick<RecipeEntry, "title" | "ingredients" | "steps"> {
