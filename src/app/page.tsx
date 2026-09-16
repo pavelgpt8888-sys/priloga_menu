@@ -1191,7 +1191,7 @@ function ShoppingView({ state, setState, commit, manualProduct, setManualProduct
   const checkedCount = state.shopping.filter((item) => item.checked && !item.alreadyAtHome && item.quantityStatus !== "unresolved").length;
   const update = (item: ShoppingItem, patch: Partial<ShoppingItem>) => setState({ ...state, shopping: state.shopping.map((entry) => entry.id === item.id ? { ...entry, ...patch } : entry) });
   function rebuildFor(meals: MealPlan[], label: string) {
-    commit({ ...state, shopping: recalculateShoppingList(state, meals) }, `Список покупок пересчитан: ${label}.`);
+    commit({ ...state, shopping: recalculateShoppingList(state, meals, { preserveEmpty: false }) }, `Список покупок пересчитан: ${label}.`);
   }
   const today = startOfToday().toISOString().slice(0, 10);
   const weekEnd = new Date(startOfToday());

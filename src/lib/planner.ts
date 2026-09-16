@@ -392,8 +392,21 @@ export function buildShoppingList(state: AppState): ShoppingItem[] {
     .sort((a, b) => a.category.localeCompare(b.category, "ru") || a.product.localeCompare(b.product, "ru"));
 }
 
-export function recalculateShoppingList(state: AppState, meals: MealPlan[] = state.meals): ShoppingItem[] {
-  return reconcileShoppingList(buildShoppingList({ ...state, meals }), state.shopping);
+export interface ShoppingRecalculationOptions {
+  preserveEmpty?: boolean;
+}
+
+function reconcileDerivedShoppingList(state: AppState, derived: ShoppingItem[], options: ShoppingRecalculationOptions = {}): ShoppingItem[] {
+  if ((options.preserveEmpty ?? true) && state.shopping.length === 0) return [];
+  return reconcileShoppingList(derived, state.shopping);
+}
+
+export function recalculateShoppingList(
+  state: AppState,
+  meals: MealPlan[] = state.meals,
+  options: ShoppingRecalculationOptions = {},
+): ShoppingItem[] {
+  return reconcileDerivedShoppingList(state, buildShoppingList({ ...state, meals }), options);
 }
 
 export interface DishSuggestion {
@@ -710,7 +723,7 @@ export function applyQuickScenario(state: AppState, scenario: string): PlannerIn
   if (scenario === "Из морозилки") return generatedInteraction(state, "freezer", "Добавлены варианты из морозилки.");
   if (scenario === "Дети это не едят") return { status: "applied", state: { ...state, bannedDishIds: [...state.bannedDishIds, ...state.dishes.filter((dish) => !dish.kidsFriendly).map((dish) => dish.id)] }, message: "Неподходящие детям блюда временно убраны из предложений." };
   if (scenario === "Добавить овощи") return { status: "applied", state, message: "К каждому ужину уже добавлены простые овощи детям и салат взрослым." };
-  if (scenario === "Из того, что есть") return { status: "applied", state: { ...state, shopping: reconcileShoppingList(buildShoppingList(state).slice(0, 6), state.shopping) }, message: "Список покупок сокращен с учетом запасов дома." };
+  if (scenario === "Из того, что есть") return { status: "applied", state: { ...state, shopping: reconcileDerivedShoppingList(state, buildShoppingList(state).slice(0, 6)) }, message: "Список покупок сокращен с учетом запасов дома." };
   return { status: "applied", state, message: "Сценарий применен." };
 }
 

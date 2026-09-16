@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { hydrateState } from "../local-state";
-import { applyQuickScenario, buildShoppingList, recalculateShoppingList, replaceComponentWithDish } from "../planner";
+import { applyQuickScenario, buildShoppingList, recalculateShoppingList, replaceComponent, replaceComponentWithDish } from "../planner";
 import { reconcileShoppingList } from "../shopping";
 import type { AppState, DishComponent, ShoppingItem } from "../types";
 import { cloneDemoState, fixedNow, generatedDemoState } from "../../../test/fixtures/family-state";
@@ -146,12 +146,33 @@ describe("shopping reconciliation", () => {
     expect(milkAfter).toMatchObject({ id: milkBefore?.id, amount: 2, unit: "л" });
   });
 
-  it("keeps an intentionally empty stored shopping list empty", () => {
+  it("keeps an intentionally empty stored shopping list empty after hydration", () => {
     const state = generatedDemoState();
 
     const hydrated = hydrateState({ ...state, shopping: [] });
 
     expect(hydrated.shopping).toEqual([]);
-    expect(recalculateShoppingList({ ...state, shopping: [] }, [])).toEqual([]);
+  });
+
+  it("keeps an intentionally empty list empty during an implicit menu replacement", () => {
+    const state = { ...generatedDemoState(), shopping: [] };
+    const dinner = state.meals.find((meal) => meal.kind === "dinner");
+    if (!dinner) throw new Error("Fixture requires a dinner");
+
+    expect(buildShoppingList(state).length).toBeGreaterThan(0);
+
+    const next = replaceComponent(state, dinner.id, "main");
+
+    expect(next.shopping).toEqual([]);
+  });
+
+  it("allows an explicit rebuild to repopulate an intentionally empty list", () => {
+    const state = { ...generatedDemoState(), shopping: [] };
+    const derived = buildShoppingList(state);
+
+    const rebuilt = recalculateShoppingList(state, state.meals, { preserveEmpty: false });
+
+    expect(derived.length).toBeGreaterThan(0);
+    expect(rebuilt).toEqual(derived);
   });
 });
