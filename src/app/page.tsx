@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { initialState } from "@/lib/demo-data";
+import { hydrateState, seededState } from "@/lib/local-state";
 import { addManualShoppingItem, addRecipeToNextMenu, addRecipeToShopping, applyQuickScenario, banDish, buildShoppingList, byId, estimatedPlanCost, generateWeek, mealLabel, moveCheckedShoppingToInventory, moveMealToDate, parseCommand, planDishForDate, planRecipeForMeal, removeComponent, replaceComponent, replacementOptions, replaceComponentWithDish, startOfToday, suggestDishesFromPantry, type DishSuggestion } from "@/lib/planner";
 import type { AppState, CookingSession, DishComponent, FamilyMember, FreezerItem, IngredientNeed, InventoryItem, Leftover, MealComponent, MealFeedback, MealKind, MealPlan, RecipeEntry, ShoppingCategory, ShoppingItem, StoragePlace } from "@/lib/types";
 
@@ -22,50 +22,6 @@ const quick = ["Нет времени", "Использовать остатки
 const slotLabels: Record<MealComponent["slot"], string> = {
   base: "основа", addon: "дополнение", drink: "напиток/фрукт/овощи", main: "основное", side: "гарнир", salad: "салат взрослым", kidsVegetables: "овощи детям", soup: "суп", dessert: "десерт",
 };
-
-function seededState(): AppState {
-  const base = { ...initialState, meals: generateWeek(initialState) };
-  return { ...base, shopping: buildShoppingList(base) };
-}
-
-function hydrateState(value: AppState): AppState {
-  const storedRecipes = Array.isArray(value.recipes) ? value.recipes : [];
-  const usableRecipes = storedRecipes.filter((recipe): recipe is RecipeEntry => {
-    const maybeRecipe = recipe as Partial<RecipeEntry>;
-    return Boolean(maybeRecipe.id && maybeRecipe.title && Array.isArray(maybeRecipe.ingredients) && Array.isArray(maybeRecipe.steps));
-  });
-  const recipeIds = new Set(usableRecipes.map((recipe) => recipe.id));
-  const recipes = [...usableRecipes, ...initialState.recipes.filter((recipe) => !recipeIds.has(recipe.id))];
-
-  const hydrated: AppState = {
-    ...initialState,
-    ...value,
-    family: value.family?.length ? value.family : initialState.family,
-    dishes: value.dishes?.length ? value.dishes : initialState.dishes,
-    inventory: value.inventory ?? initialState.inventory,
-    leftovers: value.leftovers ?? initialState.leftovers,
-    freezer: value.freezer ?? initialState.freezer,
-    meals: value.meals?.length ? value.meals : [],
-    shopping: value.shopping ?? [],
-    recipes,
-    bannedDishIds: value.bannedDishIds ?? [],
-    feedback: value.feedback ?? [],
-  };
-  const generatedMeals = generateWeek(hydrated);
-  const savedMeals = hydrated.meals.length ? hydrated.meals : generatedMeals;
-  const missingLunches = generatedMeals.filter((meal) =>
-    meal.kind === "lunch" && !savedMeals.some((saved) => saved.date === meal.date && saved.kind === "lunch"),
-  );
-  const order: MealKind[] = ["breakfast", "lunch", "dinner", "snack"];
-  const meals = [...savedMeals, ...missingLunches].sort((first, second) =>
-    first.date.localeCompare(second.date) || order.indexOf(first.kind) - order.indexOf(second.kind),
-  );
-  const manualShopping = hydrated.shopping.filter((item) => item.manuallyAdded);
-  const shopping = missingLunches.length
-    ? [...buildShoppingList({ ...hydrated, meals }), ...manualShopping]
-    : hydrated.shopping.length ? hydrated.shopping : buildShoppingList({ ...hydrated, meals });
-  return { ...hydrated, meals, shopping };
-}
 
 function subscribeToStorage(onStoreChange: () => void) {
   window.addEventListener(storageEvent, onStoreChange);
