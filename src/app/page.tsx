@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
-import { CalendarDays, Camera, ChefHat, Download, Heart, Home, IceCreamBowl, ListChecks, MoreHorizontal, Plus, RotateCcw, Settings, ShoppingBasket, Snowflake, Soup, Sparkles, Star, Upload, Users, Warehouse, X } from "lucide-react";
+import { useMemo, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
+import { Camera, ChefHat, Download, Heart, ListChecks, Plus, RotateCcw, ShoppingBasket, Sparkles, Star, Upload, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { AppShell, type AppSection } from "@/features/shell/app-shell";
 import { browserBackupDownload, downloadVerifiedBackup, type BackupDownloadResult } from "@/infrastructure/local-state/backup";
 import { captureLocalStateSnapshot, decodeLocalStateSnapshot, writePersistedState, type LocalStateWriteResult } from "@/infrastructure/local-state";
 import { localCommandExecutor, type AppCommand } from "@/lib/commands";
@@ -15,12 +16,6 @@ import { formatIngredientQuantity, parseQuantity, roundQuantity } from "@/lib/qu
 import type { AppState, CookingSession, DishComponent, FamilyMember, FreezerItem, IngredientNeed, InventoryItem, Leftover, MealComponent, MealFeedback, MealKind, MealPlan, RecipeEntry, ShoppingCategory, ShoppingItem, StoragePlace } from "@/lib/types";
 
 const storageEvent = "family-meal-planner-change";
-const sections = [
-  ["Сегодня", Home], ["Меню", CalendarDays], ["Блюда", Soup], ["Семья", Users], ["Кухня", ChefHat],
-  ["Остатки", IceCreamBowl], ["Морозилка", Snowflake], ["Запасы", Warehouse], ["Покупки", ShoppingBasket], ["Настройки", Settings],
-] as const;
-const mobilePrimarySections = [sections[0], sections[1], sections[8], sections[4]] as const;
-const mobileMoreSections = [sections[2], sections[3], sections[5], sections[6], sections[7], sections[9]] as const;
 const quick = ["Нет времени", "Использовать остатки", "Дети это не едят", "Сделать проще", "Сделать дешевле", "Добавить овощи", "Из того, что есть", "Из морозилки"];
 const slotLabels: Record<MealComponent["slot"], string> = {
   base: "основа", addon: "дополнение", drink: "напиток/фрукт/овощи", main: "основное", side: "гарнир", salad: "салат взрослым", kidsVegetables: "овощи детям", soup: "суп", dessert: "десерт",
@@ -53,7 +48,6 @@ export default function HomePage() {
   const activeSnapshot = browserReady ? storedSnapshot : "";
   const persistedState = useMemo(() => decodeLocalStateSnapshot(activeSnapshot), [activeSnapshot]);
   const state = useMemo(() => persistedState.status === "loaded" ? persistedState.state : seededState(), [persistedState]);
-  const [active, setActive] = useState<(typeof sections)[number][0]>("Сегодня");
   const [toast, setToast] = useState("");
   const [storageWriteError, setStorageWriteError] = useState<Extract<LocalStateWriteResult, { status: "error" }> | null>(null);
   const [backupResult, setBackupResult] = useState<BackupDownloadResult | null>(null);
@@ -61,16 +55,11 @@ export default function HomePage() {
   const [command, setCommand] = useState("");
   const [manualProduct, setManualProduct] = useState("");
   const [replaceRequest, setReplaceRequest] = useState<{ meal: MealPlan; slot: MealComponent["slot"] } | null>(null);
-  const [moreOpen, setMoreOpen] = useState(false);
   const appliedCommandIds = useRef<readonly string[]>([]);
 
   const dishMap = useMemo(() => byId(state.dishes), [state.dishes]);
   const today = startOfToday().toISOString().slice(0, 10);
   const todayMeals = state.meals.filter((meal) => meal.date === today);
-
-  useEffect(() => {
-    window.scrollTo({ top: 0, behavior: "auto" });
-  }, [active]);
 
   function writeState(next: AppState) {
     if (persistedState.status === "error") {
@@ -156,11 +145,10 @@ export default function HomePage() {
     setCommand("");
   }
 
-  function startCooking(meal: MealPlan) {
+  function startCooking(meal: MealPlan, navigate: (section: AppSection) => void) {
     const session: CookingSession = { mealId: meal.id, doneSteps: [], timerSeconds: 0, eaters: state.family.map((member) => member.id) };
     commit({ ...state, cooking: session }, `Открыт режим готовки: ${meal.title.toLowerCase()}.`);
-    setActive("Кухня");
-    setMoreOpen(false);
+    navigate("Кухня");
   }
 
   function addMealToShopping(meal: MealPlan) {
@@ -179,20 +167,11 @@ export default function HomePage() {
     commitMenuResult(repeatMealResult(state, meal.id, date.toISOString().slice(0, 10)), "Блюдо повторено на следующий день.");
   }
 
-  return (
-    <main className="app-bg min-h-screen bg-background pb-24 text-foreground lg:pb-0">
-      <div className="mx-auto flex max-w-[1500px] gap-5 p-3 sm:p-5">
-        <aside className="sticky top-5 hidden h-[calc(100vh-40px)] w-64 shrink-0 overflow-hidden rounded-[1.7rem] border border-[#DCCDB8] bg-[#FFFDF6]/95 p-4 shadow-[0_24px_70px_rgba(63,93,66,0.16)] lg:block">
-          <div className="mb-6 flex items-center gap-3 rounded-2xl bg-gradient-to-br from-[#fff1c9] to-[#edf7ed] p-3 ring-1 ring-[#e4d2a6]">
-            <div className="grid size-11 place-items-center rounded-xl bg-[#e4b35a] text-[#24312b] shadow-inner"><ChefHat size={24} /></div>
-            <div><p className="font-bold leading-tight">Домашний диспетчер еды</p><p className="text-sm text-muted-foreground">семейный помощник</p></div>
-          </div>
-          <nav className="grid gap-1">
-            {sections.map(([name, Icon]) => <button key={name} onClick={() => setActive(name)} className={`flex min-h-11 items-center gap-3 rounded-xl px-3 text-left text-sm font-semibold transition ${active === name ? "bg-[#3f7d52] text-white shadow-[0_10px_22px_rgba(63,125,82,0.24)]" : "text-[#4c5c55] hover:bg-[#fff1c9]"}`}><Icon size={18} />{name}{name === "Покупки" && state.shopping.length > 0 ? <span className="ml-auto rounded-full bg-[#e4b35a] px-2 py-0.5 text-xs text-[#24312b]">{state.shopping.length}</span> : null}</button>)}
-          </nav>
-        </aside>
-
-        <section className="min-w-0 flex-1 space-y-5">
+  return <AppShell
+    shoppingCount={state.shopping.length}
+    overlay={replaceRequest && <ReplaceDialog state={state} request={replaceRequest} onClose={() => setReplaceRequest(null)} onPick={(dishId) => { commitMenuResult(replaceComponentWithDishResult(state, replaceRequest.meal.id, replaceRequest.slot, dishId), `Заменили ${slotLabels[replaceRequest.slot]} вручную.`); setReplaceRequest(null); }} onAuto={() => { commitMenuResult(replaceComponentResult(state, replaceRequest.meal.id, replaceRequest.slot), `Подобрали замену для ${slotLabels[replaceRequest.slot]}.`); setReplaceRequest(null); }} />}
+  >
+    {({ active, navigate }) => <>
           <header className="rounded-2xl border border-[#ead7bd] bg-[#fffdf6] p-4 shadow-[0_10px_28px_rgba(129,83,43,0.08)] lg:hidden">
             <div className="flex items-center justify-between gap-3">
               <div className="flex min-w-0 items-center gap-3">
@@ -202,7 +181,7 @@ export default function HomePage() {
                   <p className="text-xs text-muted-foreground">{new Date().toLocaleDateString("ru-RU", { weekday: "long", day: "numeric", month: "long" })}</p>
                 </div>
               </div>
-              <button onClick={() => { setActive("Покупки"); setMoreOpen(false); }} className="relative grid size-11 shrink-0 place-items-center rounded-xl border border-[#ead7bd] bg-white text-[#40504A]" aria-label="Покупки">
+              <button onClick={() => navigate("Покупки")} className="relative grid size-11 shrink-0 place-items-center rounded-xl border border-[#ead7bd] bg-white text-[#40504A]" aria-label="Покупки">
                 <ShoppingBasket size={20} />
                 {state.shopping.length > 0 && <span className="absolute -right-1 -top-1 rounded-full bg-primary px-1.5 text-[10px] font-bold text-white">{state.shopping.length}</span>}
               </button>
@@ -225,7 +204,7 @@ export default function HomePage() {
               </div>
               <div className="flex flex-wrap gap-2">
                 {state.family.map((member) => <span key={member.id} className="rounded-full border border-[#dccdb8] bg-[#fffdf6] px-3 py-2 text-sm font-semibold text-[#40504A] shadow-sm">{member.name}, {member.age}</span>)}
-                <Button variant="soft" onClick={() => { setActive("Покупки"); setMoreOpen(false); }}><ShoppingBasket size={17} />Открыть покупки · {state.shopping.length}</Button>
+                <Button variant="soft" onClick={() => navigate("Покупки")}><ShoppingBasket size={17} />Открыть покупки · {state.shopping.length}</Button>
               </div>
             </div>
             <form onSubmit={handleCommand} className="mt-5 flex flex-col gap-2 sm:flex-row">
@@ -238,10 +217,10 @@ export default function HomePage() {
           {storageWriteError && <div role="alert" className="rounded-2xl border border-[#d89b91] bg-[#fff0ed] p-4 text-sm font-semibold text-[#7b3028]">Ошибка сохранения: {storageWriteError.code}. Текущее сохранение не изменено.</div>}
           {toast && <div className="flex flex-col gap-3 rounded-2xl border border-[#b9d6b8] bg-[#edf7ed] p-4 text-sm font-semibold text-[#285f3b] shadow-[0_12px_30px_rgba(63,125,82,0.10)] sm:flex-row sm:items-center sm:justify-between"><span>{toast}</span>{undo && <Button variant="outline" size="sm" onClick={undoLast}><RotateCcw size={16} />Отменить</Button>}</div>}
 
-          {active === "Сегодня" && <TodayView state={state} meals={todayMeals} shopping={state.shopping} dishMap={dishMap} onOpenShopping={() => setActive("Покупки")} onReplace={(meal, slot) => setReplaceRequest({ meal, slot })} onRemove={(meal, slot) => commit(removeComponent(state, meal.id, slot), `Убрали ${slotLabels[slot]}.`)} onMove={moveMeal} onRepeat={repeatMeal} onShop={addMealToShopping} onBan={(dish) => commit(banDish(state, dish.id), `${dish.name}: пока не предлагаем.`)} onCook={startCooking} onQuick={handleQuick} onPlanSuggested={(dishId, date) => commitMenuResult(planDishForDateResult(state, dishId, date), "Подобранное блюдо поставлено на ужин, покупки пересчитаны.")} />}
+          {active === "Сегодня" && <TodayView state={state} meals={todayMeals} shopping={state.shopping} dishMap={dishMap} onOpenShopping={() => navigate("Покупки")} onReplace={(meal, slot) => setReplaceRequest({ meal, slot })} onRemove={(meal, slot) => commit(removeComponent(state, meal.id, slot), `Убрали ${slotLabels[slot]}.`)} onMove={moveMeal} onRepeat={repeatMeal} onShop={addMealToShopping} onBan={(dish) => commit(banDish(state, dish.id), `${dish.name}: пока не предлагаем.`)} onCook={(meal) => startCooking(meal, navigate)} onQuick={handleQuick} onPlanSuggested={(dishId, date) => commitMenuResult(planDishForDateResult(state, dishId, date), "Подобранное блюдо поставлено на ужин, покупки пересчитаны.")} />}
           {active === "Меню" && <MenuView state={state} dishMap={dishMap} regenerate={regenerate} onReplace={(meal, slot) => setReplaceRequest({ meal, slot })} onPlanMeal={(recipe, kind, date) => {
             commitMenuResult(planRecipeForMealResult(state, recipe, date, kind), `${mealLabel(kind)} на ${new Date(date).toLocaleDateString("ru-RU", { day: "numeric", month: "long" })}: ${recipe.title}.`);
-          }} onMoveMealToDate={(meal, date) => commitMenuResult(moveMealToDateResult(state, meal.id, date), `${mealLabel(meal.kind)} перенесен на ${new Date(date).toLocaleDateString("ru-RU", { day: "numeric", month: "long" })}.`)} onOpenShopping={() => setActive("Покупки")} />}
+          }} onMoveMealToDate={(meal, date) => commitMenuResult(moveMealToDateResult(state, meal.id, date), `${mealLabel(meal.kind)} перенесен на ${new Date(date).toLocaleDateString("ru-RU", { day: "numeric", month: "long" })}.`)} onOpenShopping={() => navigate("Покупки")} />}
           {active === "Блюда" && <DishesView state={state} commit={commit} dishMap={dishMap} onBan={(dish) => commit(banDish(state, dish.id), `${dish.name}: скрыто из предложений.`)} onRecipeToMenu={(recipe) => commitMenuResult(addRecipeToNextMenuResult(state, recipe), `${recipe.title}: добавлено в меню на завтра.`)} onRecipeToShopping={(recipe) => executeCommand({ commandId: nextCommandId("shopping.add_recipe"), type: "shopping.add_recipe", payload: { recipe } }, `${recipe.title}: ингредиенты добавлены в покупки.`)} />}
           {active === "Семья" && <FamilyView state={state} commit={commit} onRebuild={() => regenerate("balanced")} />}
           {active === "Кухня" && <KitchenView state={state} dishMap={dishMap} commit={commit} />}
@@ -249,28 +228,9 @@ export default function HomePage() {
           {active === "Морозилка" && <FreezerView state={state} commit={commit} />}
           {active === "Запасы" && <InventoryView state={state} commit={commit} />}
           {active === "Покупки" && <ShoppingView state={state} commit={commit} executeCommand={executeCommand} manualProduct={manualProduct} setManualProduct={setManualProduct} />}
-          {active === "Настройки" && <SettingsView reset={() => commit(seededState(), "Демо-данные восстановлены.")} onNavigate={(section) => setActive(section)} onBackup={downloadBackup} backupResult={backupResult} />}
-        </section>
-      </div>
-
-      {moreOpen && <div className="fixed inset-0 z-30 bg-[#2f2a24]/30 lg:hidden" onClick={() => setMoreOpen(false)}>
-        <section className="absolute inset-x-0 bottom-[72px] rounded-t-3xl border border-[#ead7bd] bg-[#fffdf6] p-4 shadow-[0_-16px_40px_rgba(47,42,36,0.15)]" onClick={(event) => event.stopPropagation()}>
-          <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-lg font-black">Еще</h2>
-            <button className="grid size-10 place-items-center rounded-xl bg-white" aria-label="Закрыть" onClick={() => setMoreOpen(false)}><X size={18} /></button>
-          </div>
-          <div className="grid grid-cols-3 gap-2">
-            {mobileMoreSections.map(([name, Icon]) => <button key={name} onClick={() => { setActive(name); setMoreOpen(false); }} className={`flex min-h-20 flex-col items-center justify-center gap-2 rounded-xl text-xs font-bold ${active === name ? "bg-[#fff0dc] text-primary" : "bg-white text-[#40504A]"}`}><Icon size={21} /><span>{name}</span></button>)}
-          </div>
-        </section>
-      </div>}
-      <nav className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 gap-1 border-t border-border bg-[#FFFDF8]/98 px-2 pb-2 pt-1 backdrop-blur lg:hidden">
-        {mobilePrimarySections.map(([name, Icon]) => <button key={name} onClick={() => { setActive(name); setMoreOpen(false); }} className={`flex min-h-14 flex-col items-center justify-center gap-1 rounded-xl text-[11px] font-bold ${active === name && !moreOpen ? "text-primary" : "text-[#40504A]"}`}><Icon size={19} /><span>{name}</span></button>)}
-        <button onClick={() => setMoreOpen(!moreOpen)} className={`flex min-h-14 flex-col items-center justify-center gap-1 rounded-xl text-[11px] font-bold ${moreOpen || mobileMoreSections.some(([name]) => active === name) ? "text-primary" : "text-[#40504A]"}`}><MoreHorizontal size={19} /><span>Еще</span></button>
-      </nav>
-      {replaceRequest && <ReplaceDialog state={state} request={replaceRequest} onClose={() => setReplaceRequest(null)} onPick={(dishId) => { commitMenuResult(replaceComponentWithDishResult(state, replaceRequest.meal.id, replaceRequest.slot, dishId), `Заменили ${slotLabels[replaceRequest.slot]} вручную.`); setReplaceRequest(null); }} onAuto={() => { commitMenuResult(replaceComponentResult(state, replaceRequest.meal.id, replaceRequest.slot), `Подобрали замену для ${slotLabels[replaceRequest.slot]}.`); setReplaceRequest(null); }} />}
-    </main>
-  );
+          {active === "Настройки" && <SettingsView reset={() => commit(seededState(), "Демо-данные восстановлены.")} onNavigate={navigate} onBackup={downloadBackup} backupResult={backupResult} />}
+        </>}
+  </AppShell>;
 }
 
 function TodayView(props: { state: AppState; meals: MealPlan[]; shopping: ShoppingItem[]; dishMap: Map<string, DishComponent>; onOpenShopping: () => void; onReplace: (meal: MealPlan, slot: MealComponent["slot"]) => void; onRemove: (meal: MealPlan, slot: MealComponent["slot"]) => void; onMove: (meal: MealPlan) => void; onRepeat: (meal: MealPlan) => void; onShop: (meal: MealPlan) => void; onBan: (dish: DishComponent) => void; onCook: (meal: MealPlan) => void; onQuick: (label: string) => void; onPlanSuggested: (dishId: string, date: string) => void; }) {
@@ -1239,7 +1199,7 @@ function ShoppingView({ state, commit, executeCommand, manualProduct, setManualP
 
 function SettingsView({ reset, onNavigate, onBackup, backupResult }: {
   reset: () => void;
-  onNavigate: (section: (typeof sections)[number][0]) => void;
+  onNavigate: (section: AppSection) => void;
   onBackup: () => void;
   backupResult: BackupDownloadResult | null;
 }) {
