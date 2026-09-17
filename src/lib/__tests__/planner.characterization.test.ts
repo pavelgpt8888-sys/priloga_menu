@@ -88,12 +88,14 @@ describe("known current defects", () => {
     expect(next.shopping.find((item) => item.id === "fixture-checked")).toEqual(state.shopping.find((item) => item.id === "fixture-checked"));
   });
 
-  it("current behavior: recipe shopping mutates the nested item that Undo would snapshot", () => {
+  it("keeps the previous nested shopping item immutable for Undo", () => {
     const before = nestedMutationState();
-    const snapshotForUndo = before;
+    const snapshotForUndo = structuredClone(before);
     const next = addRecipeToShopping(before, mergingRecipeFixture());
 
-    expect(snapshotForUndo.shopping[0].amount).toBe(5);
-    expect(next.shopping[0]).toBe(snapshotForUndo.shopping[0]);
+    expect(before).toEqual(snapshotForUndo);
+    expect(before.shopping[0].amount).toBe(2);
+    expect(next.shopping[0].amount).toBe(5);
+    expect(next.shopping[0]).not.toBe(before.shopping[0]);
   });
 });
