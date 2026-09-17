@@ -52,6 +52,10 @@ export type LocalStateReadResult =
 
 export type LocalStateWriteErrorCode = "invalid_state" | "serialization_failed" | "quota_exceeded" | "storage_write_failed";
 
+export type LocalStateSerializationResult =
+  | { status: "serialized"; envelope: LocalStateEnvelopeV1; bytes: string }
+  | { status: "error"; code: "invalid_state" | "serialization_failed"; message: string; issues?: ValidationIssue[] };
+
 export type LocalStateWriteResult =
   | { status: "written"; key: typeof CURRENT_LOCAL_STATE_KEY; envelope: LocalStateEnvelopeV1; bytes: string }
   | { status: "error"; code: LocalStateWriteErrorCode; message: string; issues?: ValidationIssue[] };
@@ -222,16 +226,15 @@ export function decodeLocalStateSnapshot(snapshot: string): LocalStateReadResult
   }
 }
 
-function isQuotaError(error: unknown) {
+export function isQuotaError(error: unknown) {
   if (!isRecord(error)) return false;
   return error.name === "QuotaExceededError" || error.name === "NS_ERROR_DOM_QUOTA_REACHED" || error.code === 22 || error.code === 1014;
 }
 
-export function writePersistedState(
-  storage: LocalStateStorageWriter,
+export function serializePersistedState(
   state: AppState,
   savedAt = new Date().toISOString(),
-): LocalStateWriteResult {
+): LocalStateSerializationResult {
   const validation = validateAppState(state);
   if (!validation.success) {
     return { status: "error", code: "invalid_state", message: "Состояние не прошло runtime validation и не было сохранено.", issues: validation.issues };
@@ -245,9 +248,20 @@ export function writePersistedState(
     return { status: "error", code: "serialization_failed", message: errorMessage(error) };
   }
 
+  return { status: "serialized", envelope, bytes };
+}
+
+export function writePersistedState(
+  storage: LocalStateStorageWriter,
+  state: AppState,
+  savedAt = new Date().toISOString(),
+): LocalStateWriteResult {
+  const serialized = serializePersistedState(state, savedAt);
+  if (serialized.status === "error") return serialized;
+
   try {
-    storage.setItem(CURRENT_LOCAL_STATE_KEY, bytes);
-    return { status: "written", key: CURRENT_LOCAL_STATE_KEY, envelope, bytes };
+    storage.setItem(CURRENT_LOCAL_STATE_KEY, serialized.bytes);
+    return { status: "written", key: CURRENT_LOCAL_STATE_KEY, envelope: serialized.envelope, bytes: serialized.bytes };
   } catch (error) {
     return {
       status: "error",
