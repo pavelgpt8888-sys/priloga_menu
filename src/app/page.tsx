@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
-import { CalendarDays, Camera, ChefHat, Heart, Home, IceCreamBowl, ListChecks, MoreHorizontal, Plus, RotateCcw, Settings, ShoppingBasket, Snowflake, Soup, Sparkles, Star, Upload, Users, Warehouse, X } from "lucide-react";
+import { CalendarDays, Camera, ChefHat, Download, Heart, Home, IceCreamBowl, ListChecks, MoreHorizontal, Plus, RotateCcw, Settings, ShoppingBasket, Snowflake, Soup, Sparkles, Star, Upload, Users, Warehouse, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { browserBackupDownload, downloadVerifiedBackup, type BackupDownloadResult } from "@/infrastructure/local-state/backup";
 import { captureLocalStateSnapshot, decodeLocalStateSnapshot, writePersistedState, type LocalStateWriteResult } from "@/infrastructure/local-state";
 import { localCommandExecutor, type AppCommand } from "@/lib/commands";
 import { seededState } from "@/lib/local-state";
@@ -55,6 +56,7 @@ export default function HomePage() {
   const [active, setActive] = useState<(typeof sections)[number][0]>("Сегодня");
   const [toast, setToast] = useState("");
   const [storageWriteError, setStorageWriteError] = useState<Extract<LocalStateWriteResult, { status: "error" }> | null>(null);
+  const [backupResult, setBackupResult] = useState<BackupDownloadResult | null>(null);
   const [undo, setUndo] = useState<AppState | null>(null);
   const [command, setCommand] = useState("");
   const [manualProduct, setManualProduct] = useState("");
@@ -84,6 +86,14 @@ export default function HomePage() {
     setStorageWriteError(null);
     window.dispatchEvent(new Event(storageEvent));
     return true;
+  }
+
+  function downloadBackup() {
+    if (persistedState.status === "error") {
+      setBackupResult({ status: "error", code: "backup_validation_failed", message: "Сохраненные данные повреждены или имеют неподдерживаемую версию." });
+      return;
+    }
+    setBackupResult(downloadVerifiedBackup(state, browserBackupDownload));
   }
 
   function executeCommand(command: AppCommand, message: string, captureUndo = true) {
@@ -239,7 +249,7 @@ export default function HomePage() {
           {active === "Морозилка" && <FreezerView state={state} commit={commit} />}
           {active === "Запасы" && <InventoryView state={state} commit={commit} />}
           {active === "Покупки" && <ShoppingView state={state} commit={commit} executeCommand={executeCommand} manualProduct={manualProduct} setManualProduct={setManualProduct} />}
-          {active === "Настройки" && <SettingsView reset={() => commit(seededState(), "Демо-данные восстановлены.")} onNavigate={(section) => setActive(section)} />}
+          {active === "Настройки" && <SettingsView reset={() => commit(seededState(), "Демо-данные восстановлены.")} onNavigate={(section) => setActive(section)} onBackup={downloadBackup} backupResult={backupResult} />}
         </section>
       </div>
 
@@ -1227,7 +1237,29 @@ function ShoppingView({ state, commit, executeCommand, manualProduct, setManualP
   return <div className="space-y-4"><Card><CardHeader className="space-y-3"><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><CardTitle>Общий список покупок</CardTitle><p className="text-sm text-muted-foreground">Как в Plan to Eat: создайте список из выбранного периода меню, а купленное перенесите в запасы.</p></div><Button variant="soft" disabled={!checkedCount} onClick={() => executeCommand({ commandId: nextCommandId("shopping.move_checked_to_inventory"), type: "shopping.move_checked_to_inventory", payload: {} }, `Купленное перенесено в запасы: ${checkedCount} поз.`)}>Купленное в запасы</Button></div><div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" onClick={() => rebuildFor(state.meals.filter((meal) => meal.date === today), "сегодня")}>Из меню сегодня</Button><Button variant="outline" size="sm" onClick={() => rebuildFor(state.meals.filter((meal) => meal.date >= today && meal.date <= weekEndIso), "7 дней")}>Из меню на 7 дней</Button><Button variant="outline" size="sm" onClick={() => rebuildFor(state.meals, "все запланированное")}>Из всего меню</Button></div></CardHeader></Card><form className="flex gap-2" onSubmit={(event) => { event.preventDefault(); executeCommand({ commandId: nextCommandId("shopping.add_manual"), type: "shopping.add_manual", payload: { product: manualProduct } }, "Добавили вручную в покупки."); setManualProduct(""); }}><Input value={manualProduct} onChange={(event) => setManualProduct(event.target.value)} placeholder="Добавить вручную: молоко, хлеб, салфетки" /><Button>Добавить</Button></form>{Object.entries(grouped).map(([category, items]) => <Card key={category}><CardHeader><CardTitle>{category}</CardTitle></CardHeader><CardContent className="space-y-2">{items?.map((item) => { const unresolved = item.quantityStatus === "unresolved"; return <div key={item.id} className="flex flex-col gap-3 rounded-xl bg-white p-3 sm:flex-row sm:items-center sm:justify-between"><label className="flex items-center gap-3 font-semibold"><input type="checkbox" checked={unresolved ? false : item.checked} disabled={unresolved} aria-label={unresolved ? `${item.product}: сначала уточните количество` : `${item.product}: куплено`} onChange={(event) => update(item, { checked: event.target.checked })} /><span>{item.product} · {formatIngredientQuantity(item)}</span>{unresolved && <span className="rounded-full bg-[#fff1c9] px-2 py-1 text-xs font-bold text-[#6f4b16]">Уточнить количество</span>}</label><div className="flex flex-wrap gap-2"><Button variant="ghost" size="sm" onClick={() => update(item, { alreadyAtHome: !item.alreadyAtHome })}>{item.alreadyAtHome ? "Уже есть" : "Есть дома"}</Button><Button variant="ghost" size="sm" disabled={unresolved} onClick={() => update(item, { amount: Math.max(0.5, item.amount - 1) })}>Меньше</Button><Button variant="ghost" size="sm" disabled={unresolved} onClick={() => update(item, { amount: item.amount + 1 })}>Больше</Button><Button variant="danger" size="sm" onClick={() => commit({ ...state, shopping: state.shopping.filter((entry) => entry.id !== item.id) }, `${item.product}: удалено из покупок.`)}>Удалить</Button></div></div>; })}</CardContent></Card>)}</div>;
 }
 
-function SettingsView({ reset, onNavigate }: { reset: () => void; onNavigate: (section: (typeof sections)[number][0]) => void }) { return <div className="grid gap-4 xl:grid-cols-2"><Card><CardHeader><CardTitle>Настройки MVP</CardTitle></CardHeader><CardContent className="space-y-3"><p className="text-muted-foreground">Данные хранятся локально в браузере. Синхронизацию между семьями подключим через облачную базу на следующем этапе.</p><Button variant="outline" onClick={reset}>Сбросить демо-данные</Button></CardContent></Card><Card><CardHeader><CardTitle>Вкусы и ограничения</CardTitle></CardHeader><CardContent className="space-y-3"><p className="text-sm text-muted-foreground">Любимые блюда, запреты и заметки уже редактируются в профилях семьи и влияют на новое меню.</p><Button variant="soft" onClick={() => onNavigate("Семья")}><Users size={16} />Открыть профили семьи</Button></CardContent></Card><Card><CardHeader><CardTitle>Импорт рецепта</CardTitle></CardHeader><CardContent className="space-y-3"><p className="text-sm text-muted-foreground">В разделе «Блюда» работает ручной рецепт и черновик из вставленного текста со снимка. Настоящее распознавание изображения подключим вместе с AI.</p><Button variant="soft" onClick={() => onNavigate("Блюда")}><Camera size={16} />Открыть рецепты и импорт</Button><Button variant="outline" disabled><Sparkles size={16} />AI-распознавание: позже</Button></CardContent></Card></div>; }
+function SettingsView({ reset, onNavigate, onBackup, backupResult }: {
+  reset: () => void;
+  onNavigate: (section: (typeof sections)[number][0]) => void;
+  onBackup: () => void;
+  backupResult: BackupDownloadResult | null;
+}) {
+  return <div className="grid gap-4 xl:grid-cols-2">
+    <Card>
+      <CardHeader><CardTitle>Настройки MVP</CardTitle></CardHeader>
+      <CardContent className="space-y-3">
+        <p className="text-muted-foreground">Данные хранятся локально в браузере. Синхронизацию между семьями подключим через облачную базу на следующем этапе.</p>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="soft" onClick={onBackup}><Download size={16} />Скачать резервную копию JSON</Button>
+          <Button variant="outline" onClick={reset}>Сбросить демо-данные</Button>
+        </div>
+        {backupResult?.status === "downloaded" && <p role="status" className="text-sm font-semibold text-[#285f3b]">Резервная копия проверена и скачана</p>}
+        {backupResult?.status === "error" && <p role="alert" className="text-sm font-semibold text-[#7b3028]">Не удалось создать резервную копию: {backupResult.message}</p>}
+      </CardContent>
+    </Card>
+    <Card><CardHeader><CardTitle>Вкусы и ограничения</CardTitle></CardHeader><CardContent className="space-y-3"><p className="text-sm text-muted-foreground">Любимые блюда, запреты и заметки уже редактируются в профилях семьи и влияют на новое меню.</p><Button variant="soft" onClick={() => onNavigate("Семья")}><Users size={16} />Открыть профили семьи</Button></CardContent></Card>
+    <Card><CardHeader><CardTitle>Импорт рецепта</CardTitle></CardHeader><CardContent className="space-y-3"><p className="text-sm text-muted-foreground">В разделе «Блюда» работает ручной рецепт и черновик из вставленного текста со снимка. Настоящее распознавание изображения подключим вместе с AI.</p><Button variant="soft" onClick={() => onNavigate("Блюда")}><Camera size={16} />Открыть рецепты и импорт</Button><Button variant="outline" disabled><Sparkles size={16} />AI-распознавание: позже</Button></CardContent></Card>
+  </div>;
+}
 
 function ShoppingPreview({ items, onOpen }: { items: ShoppingItem[]; onOpen: () => void }) {
   const visible = items.filter((item) => !item.checked && !item.alreadyAtHome).slice(0, 6);
