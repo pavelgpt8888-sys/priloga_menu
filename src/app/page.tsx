@@ -6,13 +6,13 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { captureLocalStateSnapshot, decodeLocalStateSnapshot, writePersistedState, type LocalStateWriteResult } from "@/infrastructure/local-state";
 import { localCommandExecutor, type AppCommand } from "@/lib/commands";
-import { hydrateState, seededState } from "@/lib/local-state";
+import { seededState } from "@/lib/local-state";
 import { addRecipeToNextMenuResult, applyQuickScenario, banDish, byId, estimatedPlanCost, generateWeekResult, mealLabel, moveMealToDateResult, parseCommand, planDishForDateResult, planRecipeForMealResult, recalculateShoppingList, removeComponent, repeatMealResult, replaceComponentResult, replacementOptions, replaceComponentWithDishResult, startOfToday, suggestDishesFromPantry, type DishSuggestion, type MenuMutationResult } from "@/lib/planner";
 import { formatIngredientQuantity, parseQuantity, roundQuantity } from "@/lib/quantity";
 import type { AppState, CookingSession, DishComponent, FamilyMember, FreezerItem, IngredientNeed, InventoryItem, Leftover, MealComponent, MealFeedback, MealKind, MealPlan, RecipeEntry, ShoppingCategory, ShoppingItem, StoragePlace } from "@/lib/types";
 
-const storageKey = "family-meal-planner-state-v1";
 const storageEvent = "family-meal-planner-change";
 const sections = [
   ["Сегодня", Home], ["Меню", CalendarDays], ["Блюда", Soup], ["Семья", Users], ["Кухня", ChefHat],
@@ -35,7 +35,7 @@ function subscribeToStorage(onStoreChange: () => void) {
 }
 
 function readStorageSnapshot() {
-  return localStorage.getItem(storageKey) ?? "";
+  return captureLocalStateSnapshot(localStorage);
 }
 
 function subscribeToBrowserReady() {
@@ -50,16 +50,11 @@ export default function HomePage() {
   const storedSnapshot = useSyncExternalStore(subscribeToStorage, readStorageSnapshot, () => "");
   const browserReady = useSyncExternalStore(subscribeToBrowserReady, () => true, () => false);
   const activeSnapshot = browserReady ? storedSnapshot : "";
-  const state = useMemo(() => {
-    if (!activeSnapshot) return seededState();
-    try {
-      return hydrateState(JSON.parse(activeSnapshot) as AppState);
-    } catch {
-      return seededState();
-    }
-  }, [activeSnapshot]);
+  const persistedState = useMemo(() => decodeLocalStateSnapshot(activeSnapshot), [activeSnapshot]);
+  const state = useMemo(() => persistedState.status === "loaded" ? persistedState.state : seededState(), [persistedState]);
   const [active, setActive] = useState<(typeof sections)[number][0]>("Сегодня");
   const [toast, setToast] = useState("");
+  const [storageWriteError, setStorageWriteError] = useState<Extract<LocalStateWriteResult, { status: "error" }> | null>(null);
   const [undo, setUndo] = useState<AppState | null>(null);
   const [command, setCommand] = useState("");
   const [manualProduct, setManualProduct] = useState("");
@@ -76,16 +71,27 @@ export default function HomePage() {
   }, [active]);
 
   function writeState(next: AppState) {
-    localStorage.setItem(storageKey, JSON.stringify(next));
+    if (persistedState.status === "error") {
+      setToast("Сохранение заблокировано: сначала нужно восстановить или удалить поврежденные данные.");
+      return false;
+    }
+    const writeResult = writePersistedState(localStorage, next);
+    if (writeResult.status === "error") {
+      setStorageWriteError(writeResult);
+      setToast(writeResult.code === "quota_exceeded" ? "Не удалось сохранить: хранилище браузера переполнено." : "Не удалось сохранить данные в браузере.");
+      return false;
+    }
+    setStorageWriteError(null);
     window.dispatchEvent(new Event(storageEvent));
+    return true;
   }
 
   function executeCommand(command: AppCommand, message: string, captureUndo = true) {
     const result = localCommandExecutor({ state, appliedCommandIds: appliedCommandIds.current }, command);
-    appliedCommandIds.current = result.appliedCommandIds;
     if (result.status === "duplicate") return;
+    if (!writeState(result.state)) return;
+    appliedCommandIds.current = result.appliedCommandIds;
     if (captureUndo) setUndo(result.previousState);
-    writeState(result.state);
     setToast(message);
   }
 
@@ -218,6 +224,8 @@ export default function HomePage() {
             </form>
           </header>
 
+          {persistedState.status === "error" && <div role="alert" className="rounded-2xl border border-[#e1b879] bg-[#fff4df] p-4 text-sm font-semibold text-[#6f4b16]">Сохраненные данные не загружены и оставлены без изменений. Режим только для чтения: {persistedState.code}.</div>}
+          {storageWriteError && <div role="alert" className="rounded-2xl border border-[#d89b91] bg-[#fff0ed] p-4 text-sm font-semibold text-[#7b3028]">Ошибка сохранения: {storageWriteError.code}. Текущее сохранение не изменено.</div>}
           {toast && <div className="flex flex-col gap-3 rounded-2xl border border-[#b9d6b8] bg-[#edf7ed] p-4 text-sm font-semibold text-[#285f3b] shadow-[0_12px_30px_rgba(63,125,82,0.10)] sm:flex-row sm:items-center sm:justify-between"><span>{toast}</span>{undo && <Button variant="outline" size="sm" onClick={undoLast}><RotateCcw size={16} />Отменить</Button>}</div>}
 
           {active === "Сегодня" && <TodayView state={state} meals={todayMeals} shopping={state.shopping} dishMap={dishMap} onOpenShopping={() => setActive("Покупки")} onReplace={(meal, slot) => setReplaceRequest({ meal, slot })} onRemove={(meal, slot) => commit(removeComponent(state, meal.id, slot), `Убрали ${slotLabels[slot]}.`)} onMove={moveMeal} onRepeat={repeatMeal} onShop={addMealToShopping} onBan={(dish) => commit(banDish(state, dish.id), `${dish.name}: пока не предлагаем.`)} onCook={startCooking} onQuick={handleQuick} onPlanSuggested={(dishId, date) => commitMenuResult(planDishForDateResult(state, dishId, date), "Подобранное блюдо поставлено на ужин, покупки пересчитаны.")} />}
