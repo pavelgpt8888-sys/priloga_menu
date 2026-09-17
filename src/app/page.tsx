@@ -1,13 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useState, useSyncExternalStore, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
 import { CalendarDays, Camera, ChefHat, Heart, Home, IceCreamBowl, ListChecks, MoreHorizontal, Plus, RotateCcw, Settings, ShoppingBasket, Snowflake, Soup, Sparkles, Star, Upload, Users, Warehouse, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { localCommandExecutor, type AppCommand } from "@/lib/commands";
 import { hydrateState, seededState } from "@/lib/local-state";
-import { addManualShoppingItem, addRecipeToNextMenuResult, addRecipeToShopping, applyQuickScenario, banDish, byId, estimatedPlanCost, generateWeekResult, mealLabel, moveCheckedShoppingToInventory, moveMealToDateResult, parseCommand, planDishForDateResult, planRecipeForMealResult, recalculateShoppingList, removeComponent, repeatMealResult, replaceComponentResult, replacementOptions, replaceComponentWithDishResult, startOfToday, suggestDishesFromPantry, type DishSuggestion, type MenuMutationResult } from "@/lib/planner";
+import { addRecipeToNextMenuResult, applyQuickScenario, banDish, byId, estimatedPlanCost, generateWeekResult, mealLabel, moveMealToDateResult, parseCommand, planDishForDateResult, planRecipeForMealResult, recalculateShoppingList, removeComponent, repeatMealResult, replaceComponentResult, replacementOptions, replaceComponentWithDishResult, startOfToday, suggestDishesFromPantry, type DishSuggestion, type MenuMutationResult } from "@/lib/planner";
 import { formatIngredientQuantity, parseQuantity, roundQuantity } from "@/lib/quantity";
 import type { AppState, CookingSession, DishComponent, FamilyMember, FreezerItem, IngredientNeed, InventoryItem, Leftover, MealComponent, MealFeedback, MealKind, MealPlan, RecipeEntry, ShoppingCategory, ShoppingItem, StoragePlace } from "@/lib/types";
 
@@ -41,6 +42,10 @@ function subscribeToBrowserReady() {
   return () => undefined;
 }
 
+function nextCommandId(type: AppCommand["type"]) {
+  return `${type}-${globalThis.crypto.randomUUID()}`;
+}
+
 export default function HomePage() {
   const storedSnapshot = useSyncExternalStore(subscribeToStorage, readStorageSnapshot, () => "");
   const browserReady = useSyncExternalStore(subscribeToBrowserReady, () => true, () => false);
@@ -60,6 +65,7 @@ export default function HomePage() {
   const [manualProduct, setManualProduct] = useState("");
   const [replaceRequest, setReplaceRequest] = useState<{ meal: MealPlan; slot: MealComponent["slot"] } | null>(null);
   const [moreOpen, setMoreOpen] = useState(false);
+  const appliedCommandIds = useRef<readonly string[]>([]);
 
   const dishMap = useMemo(() => byId(state.dishes), [state.dishes]);
   const today = startOfToday().toISOString().slice(0, 10);
@@ -69,15 +75,28 @@ export default function HomePage() {
     window.scrollTo({ top: 0, behavior: "auto" });
   }, [active]);
 
-  function setState(next: AppState) {
+  function writeState(next: AppState) {
     localStorage.setItem(storageKey, JSON.stringify(next));
     window.dispatchEvent(new Event(storageEvent));
   }
 
-  function commit(next: AppState, message: string) {
-    setUndo(state);
-    setState(next);
+  function executeCommand(command: AppCommand, message: string, captureUndo = true) {
+    const result = localCommandExecutor({ state, appliedCommandIds: appliedCommandIds.current }, command);
+    appliedCommandIds.current = result.appliedCommandIds;
+    if (result.status === "duplicate") return;
+    if (captureUndo) setUndo(result.previousState);
+    writeState(result.state);
     setToast(message);
+  }
+
+  function commit(next: AppState, message: string) {
+    executeCommand({ commandId: nextCommandId("state.replace"), type: "state.replace", payload: { state: next } }, message);
+  }
+
+  function undoLast() {
+    if (!undo) return;
+    executeCommand({ commandId: nextCommandId("state.restore"), type: "state.restore", payload: { snapshot: undo } }, "Отменено. Вернули предыдущее состояние.", false);
+    setUndo(null);
   }
 
   function blockedMessage(result: Extract<MenuMutationResult, { status: "blocked" }>) {
@@ -199,19 +218,19 @@ export default function HomePage() {
             </form>
           </header>
 
-          {toast && <div className="flex flex-col gap-3 rounded-2xl border border-[#b9d6b8] bg-[#edf7ed] p-4 text-sm font-semibold text-[#285f3b] shadow-[0_12px_30px_rgba(63,125,82,0.10)] sm:flex-row sm:items-center sm:justify-between"><span>{toast}</span>{undo && <Button variant="outline" size="sm" onClick={() => { setState(undo); setUndo(null); setToast("Отменено. Вернули предыдущее состояние."); }}><RotateCcw size={16} />Отменить</Button>}</div>}
+          {toast && <div className="flex flex-col gap-3 rounded-2xl border border-[#b9d6b8] bg-[#edf7ed] p-4 text-sm font-semibold text-[#285f3b] shadow-[0_12px_30px_rgba(63,125,82,0.10)] sm:flex-row sm:items-center sm:justify-between"><span>{toast}</span>{undo && <Button variant="outline" size="sm" onClick={undoLast}><RotateCcw size={16} />Отменить</Button>}</div>}
 
           {active === "Сегодня" && <TodayView state={state} meals={todayMeals} shopping={state.shopping} dishMap={dishMap} onOpenShopping={() => setActive("Покупки")} onReplace={(meal, slot) => setReplaceRequest({ meal, slot })} onRemove={(meal, slot) => commit(removeComponent(state, meal.id, slot), `Убрали ${slotLabels[slot]}.`)} onMove={moveMeal} onRepeat={repeatMeal} onShop={addMealToShopping} onBan={(dish) => commit(banDish(state, dish.id), `${dish.name}: пока не предлагаем.`)} onCook={startCooking} onQuick={handleQuick} onPlanSuggested={(dishId, date) => commitMenuResult(planDishForDateResult(state, dishId, date), "Подобранное блюдо поставлено на ужин, покупки пересчитаны.")} />}
           {active === "Меню" && <MenuView state={state} dishMap={dishMap} regenerate={regenerate} onReplace={(meal, slot) => setReplaceRequest({ meal, slot })} onPlanMeal={(recipe, kind, date) => {
             commitMenuResult(planRecipeForMealResult(state, recipe, date, kind), `${mealLabel(kind)} на ${new Date(date).toLocaleDateString("ru-RU", { day: "numeric", month: "long" })}: ${recipe.title}.`);
           }} onMoveMealToDate={(meal, date) => commitMenuResult(moveMealToDateResult(state, meal.id, date), `${mealLabel(meal.kind)} перенесен на ${new Date(date).toLocaleDateString("ru-RU", { day: "numeric", month: "long" })}.`)} onOpenShopping={() => setActive("Покупки")} />}
-          {active === "Блюда" && <DishesView state={state} setState={setState} dishMap={dishMap} onBan={(dish) => commit(banDish(state, dish.id), `${dish.name}: скрыто из предложений.`)} onRecipeToMenu={(recipe) => commitMenuResult(addRecipeToNextMenuResult(state, recipe), `${recipe.title}: добавлено в меню на завтра.`)} onRecipeToShopping={(recipe) => commit(addRecipeToShopping(state, recipe), `${recipe.title}: ингредиенты добавлены в покупки.`)} />}
-          {active === "Семья" && <FamilyView state={state} setState={setState} onRebuild={() => regenerate("balanced")} />}
+          {active === "Блюда" && <DishesView state={state} commit={commit} dishMap={dishMap} onBan={(dish) => commit(banDish(state, dish.id), `${dish.name}: скрыто из предложений.`)} onRecipeToMenu={(recipe) => commitMenuResult(addRecipeToNextMenuResult(state, recipe), `${recipe.title}: добавлено в меню на завтра.`)} onRecipeToShopping={(recipe) => executeCommand({ commandId: nextCommandId("shopping.add_recipe"), type: "shopping.add_recipe", payload: { recipe } }, `${recipe.title}: ингредиенты добавлены в покупки.`)} />}
+          {active === "Семья" && <FamilyView state={state} commit={commit} onRebuild={() => regenerate("balanced")} />}
           {active === "Кухня" && <KitchenView state={state} dishMap={dishMap} commit={commit} />}
           {active === "Остатки" && <LeftoversView state={state} commit={commit} />}
           {active === "Морозилка" && <FreezerView state={state} commit={commit} />}
-          {active === "Запасы" && <InventoryView state={state} setState={setState} commit={commit} />}
-          {active === "Покупки" && <ShoppingView state={state} setState={setState} commit={commit} manualProduct={manualProduct} setManualProduct={setManualProduct} />}
+          {active === "Запасы" && <InventoryView state={state} commit={commit} />}
+          {active === "Покупки" && <ShoppingView state={state} commit={commit} executeCommand={executeCommand} manualProduct={manualProduct} setManualProduct={setManualProduct} />}
           {active === "Настройки" && <SettingsView reset={() => commit(seededState(), "Демо-данные восстановлены.")} onNavigate={(section) => setActive(section)} />}
         </section>
       </div>
@@ -484,7 +503,7 @@ function MenuView({ state, dishMap, regenerate, onReplace, onPlanMeal, onMoveMea
   </div>;
 }
 
-function DishesView({ state, setState, dishMap, onBan, onRecipeToMenu, onRecipeToShopping }: { state: AppState; setState: (state: AppState) => void; dishMap: Map<string, DishComponent>; onBan: (dish: DishComponent) => void; onRecipeToMenu: (recipe: RecipeEntry) => void; onRecipeToShopping: (recipe: RecipeEntry) => void }) {
+function DishesView({ state, commit, dishMap, onBan, onRecipeToMenu, onRecipeToShopping }: { state: AppState; commit: (state: AppState, message: string) => void; dishMap: Map<string, DishComponent>; onBan: (dish: DishComponent) => void; onRecipeToMenu: (recipe: RecipeEntry) => void; onRecipeToShopping: (recipe: RecipeEntry) => void }) {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("все");
   const [quickFilter, setQuickFilter] = useState("все");
@@ -508,7 +527,7 @@ function DishesView({ state, setState, dishMap, onBan, onRecipeToMenu, onRecipeT
   const grouped = Object.groupBy(state.dishes, (dish) => dish.role);
 
   function updateRecipe(recipeId: string, patch: Partial<RecipeEntry>) {
-    setState({ ...state, recipes: state.recipes.map((recipe) => recipe.id === recipeId ? { ...recipe, ...patch } : recipe) });
+    commit({ ...state, recipes: state.recipes.map((recipe) => recipe.id === recipeId ? { ...recipe, ...patch } : recipe) }, "Рецепт обновлен.");
   }
 
   function createRecipe() {
@@ -529,7 +548,7 @@ function DishesView({ state, setState, dishMap, onBan, onRecipeToMenu, onRecipeT
       steps: ["Описать первый шаг"],
       status: "draft",
     };
-    setState({ ...state, recipes: [recipe, ...state.recipes] });
+    commit({ ...state, recipes: [recipe, ...state.recipes] }, "Новый рецепт создан.");
     setSelectedId(recipe.id);
     setEditing(true);
   }
@@ -553,7 +572,7 @@ function DishesView({ state, setState, dishMap, onBan, onRecipeToMenu, onRecipeT
       steps: parsed.steps,
       status: "draft",
     };
-    setState({ ...state, recipes: [recipe, ...state.recipes] });
+    commit({ ...state, recipes: [recipe, ...state.recipes] }, "Черновик рецепта создан.");
     setSelectedId(recipe.id);
     setEditing(true);
     setPhotoDraftText("");
@@ -563,7 +582,7 @@ function DishesView({ state, setState, dishMap, onBan, onRecipeToMenu, onRecipeT
   function deleteRecipe(recipeId: string) {
     if (state.recipes.length <= 1) return;
     const recipes = state.recipes.filter((recipe) => recipe.id !== recipeId);
-    setState({ ...state, recipes });
+    commit({ ...state, recipes }, "Рецепт удален.");
     setSelectedId(recipes[0]?.id ?? "");
     setEditing(false);
   }
@@ -826,9 +845,9 @@ function parseRecipeDraftText(value: string): Pick<RecipeEntry, "title" | "ingre
   };
 }
 
-function FamilyView({ state, setState, onRebuild }: { state: AppState; setState: (state: AppState) => void; onRebuild: () => void }) {
+function FamilyView({ state, commit, onRebuild }: { state: AppState; commit: (state: AppState, message: string) => void; onRebuild: () => void }) {
   function updateMember(memberId: string, patch: Partial<FamilyMember>) {
-    setState({ ...state, family: state.family.map((member) => member.id === memberId ? { ...member, ...patch } : member) });
+    commit({ ...state, family: state.family.map((member) => member.id === memberId ? { ...member, ...patch } : member) }, "Профиль семьи обновлен.");
   }
 
   function addMember() {
@@ -844,12 +863,12 @@ function FamilyView({ state, setState, onRebuild }: { state: AppState; setState:
       restrictions: [],
       notes: "",
     };
-    setState({ ...state, family: [...state.family, member] });
+    commit({ ...state, family: [...state.family, member] }, "Участник семьи добавлен.");
   }
 
   function removeMember(memberId: string) {
     if (state.family.length <= 1) return;
-    setState({ ...state, family: state.family.filter((member) => member.id !== memberId) });
+    commit({ ...state, family: state.family.filter((member) => member.id !== memberId) }, "Участник семьи удален.");
   }
 
   return <div className="space-y-4">
@@ -1120,7 +1139,7 @@ function FreezerView({ state, commit }: { state: AppState; commit: (next: AppSta
     </div>
   </div>;
 }
-function InventoryView({ state, setState, commit }: { state: AppState; setState: (state: AppState) => void; commit: (next: AppState, message: string) => void }) {
+function InventoryView({ state, commit }: { state: AppState; commit: (next: AppState, message: string) => void }) {
   const [product, setProduct] = useState("");
   const [amount, setAmount] = useState("1");
   const [unit, setUnit] = useState("шт");
@@ -1128,7 +1147,7 @@ function InventoryView({ state, setState, commit }: { state: AppState; setState:
   const [place, setPlace] = useState<StoragePlace>("fridge");
   const [expiresAt, setExpiresAt] = useState("");
   const placeLabel: Record<StoragePlace, string> = { fridge: "холодильник", freezer: "морозилка", pantry: "шкаф" };
-  const update = (item: InventoryItem, patch: Partial<InventoryItem>) => setState({ ...state, inventory: state.inventory.map((entry) => entry.id === item.id ? { ...entry, ...patch } : entry) });
+  const update = (item: InventoryItem, patch: Partial<InventoryItem>) => commit({ ...state, inventory: state.inventory.map((entry) => entry.id === item.id ? { ...entry, ...patch } : entry) }, `${item.product}: запасы обновлены.`);
   const addInventory = (event: FormEvent) => {
     event.preventDefault();
     const cleanProduct = product.trim();
@@ -1177,7 +1196,7 @@ function InventoryView({ state, setState, commit }: { state: AppState; setState:
             <Button variant="ghost" size="sm" onClick={() => update(item, { amount: Math.max(0.1, Number((item.amount - 1).toFixed(1))) })}>Меньше</Button>
             <Button variant="ghost" size="sm" onClick={() => update(item, { amount: Number((item.amount + 1).toFixed(1)) })}>Больше</Button>
             <Button variant="outline" size="sm" onClick={() => update(item, { urgent: !item.urgent })}>{item.urgent ? "Не срочно" : "Срочно"}</Button>
-            <Button variant="danger" size="sm" onClick={() => setState({ ...state, inventory: state.inventory.filter((entry) => entry.id !== item.id) })}>Удалить</Button>
+            <Button variant="danger" size="sm" onClick={() => commit({ ...state, inventory: state.inventory.filter((entry) => entry.id !== item.id) }, `${item.product}: удалено из запасов.`)}>Удалить</Button>
           </div>
         </CardContent>
       </Card>;
@@ -1186,10 +1205,10 @@ function InventoryView({ state, setState, commit }: { state: AppState; setState:
   </div>;
 }
 
-function ShoppingView({ state, setState, commit, manualProduct, setManualProduct }: { state: AppState; setState: (state: AppState) => void; commit: (next: AppState, message: string) => void; manualProduct: string; setManualProduct: (value: string) => void }) {
+function ShoppingView({ state, commit, executeCommand, manualProduct, setManualProduct }: { state: AppState; commit: (next: AppState, message: string) => void; executeCommand: (command: AppCommand, message: string) => void; manualProduct: string; setManualProduct: (value: string) => void }) {
   const grouped = Object.groupBy(state.shopping, (item) => item.category);
   const checkedCount = state.shopping.filter((item) => item.checked && !item.alreadyAtHome && item.quantityStatus !== "unresolved").length;
-  const update = (item: ShoppingItem, patch: Partial<ShoppingItem>) => setState({ ...state, shopping: state.shopping.map((entry) => entry.id === item.id ? { ...entry, ...patch } : entry) });
+  const update = (item: ShoppingItem, patch: Partial<ShoppingItem>) => commit({ ...state, shopping: state.shopping.map((entry) => entry.id === item.id ? { ...entry, ...patch } : entry) }, `${item.product}: список покупок обновлен.`);
   function rebuildFor(meals: MealPlan[], label: string) {
     commit({ ...state, shopping: recalculateShoppingList(state, meals, { preserveEmpty: false }) }, `Список покупок пересчитан: ${label}.`);
   }
@@ -1197,7 +1216,7 @@ function ShoppingView({ state, setState, commit, manualProduct, setManualProduct
   const weekEnd = new Date(startOfToday());
   weekEnd.setDate(weekEnd.getDate() + 6);
   const weekEndIso = weekEnd.toISOString().slice(0, 10);
-  return <div className="space-y-4"><Card><CardHeader className="space-y-3"><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><CardTitle>Общий список покупок</CardTitle><p className="text-sm text-muted-foreground">Как в Plan to Eat: создайте список из выбранного периода меню, а купленное перенесите в запасы.</p></div><Button variant="soft" disabled={!checkedCount} onClick={() => commit(moveCheckedShoppingToInventory(state), `Купленное перенесено в запасы: ${checkedCount} поз.`)}>Купленное в запасы</Button></div><div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" onClick={() => rebuildFor(state.meals.filter((meal) => meal.date === today), "сегодня")}>Из меню сегодня</Button><Button variant="outline" size="sm" onClick={() => rebuildFor(state.meals.filter((meal) => meal.date >= today && meal.date <= weekEndIso), "7 дней")}>Из меню на 7 дней</Button><Button variant="outline" size="sm" onClick={() => rebuildFor(state.meals, "все запланированное")}>Из всего меню</Button></div></CardHeader></Card><form className="flex gap-2" onSubmit={(event) => { event.preventDefault(); commit(addManualShoppingItem(state, manualProduct), "Добавили вручную в покупки."); setManualProduct(""); }}><Input value={manualProduct} onChange={(event) => setManualProduct(event.target.value)} placeholder="Добавить вручную: молоко, хлеб, салфетки" /><Button>Добавить</Button></form>{Object.entries(grouped).map(([category, items]) => <Card key={category}><CardHeader><CardTitle>{category}</CardTitle></CardHeader><CardContent className="space-y-2">{items?.map((item) => { const unresolved = item.quantityStatus === "unresolved"; return <div key={item.id} className="flex flex-col gap-3 rounded-xl bg-white p-3 sm:flex-row sm:items-center sm:justify-between"><label className="flex items-center gap-3 font-semibold"><input type="checkbox" checked={unresolved ? false : item.checked} disabled={unresolved} aria-label={unresolved ? `${item.product}: сначала уточните количество` : `${item.product}: куплено`} onChange={(event) => update(item, { checked: event.target.checked })} /><span>{item.product} · {formatIngredientQuantity(item)}</span>{unresolved && <span className="rounded-full bg-[#fff1c9] px-2 py-1 text-xs font-bold text-[#6f4b16]">Уточнить количество</span>}</label><div className="flex flex-wrap gap-2"><Button variant="ghost" size="sm" onClick={() => update(item, { alreadyAtHome: !item.alreadyAtHome })}>{item.alreadyAtHome ? "Уже есть" : "Есть дома"}</Button><Button variant="ghost" size="sm" disabled={unresolved} onClick={() => update(item, { amount: Math.max(0.5, item.amount - 1) })}>Меньше</Button><Button variant="ghost" size="sm" disabled={unresolved} onClick={() => update(item, { amount: item.amount + 1 })}>Больше</Button><Button variant="danger" size="sm" onClick={() => setState({ ...state, shopping: state.shopping.filter((entry) => entry.id !== item.id) })}>Удалить</Button></div></div>; })}</CardContent></Card>)}</div>;
+  return <div className="space-y-4"><Card><CardHeader className="space-y-3"><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><CardTitle>Общий список покупок</CardTitle><p className="text-sm text-muted-foreground">Как в Plan to Eat: создайте список из выбранного периода меню, а купленное перенесите в запасы.</p></div><Button variant="soft" disabled={!checkedCount} onClick={() => executeCommand({ commandId: nextCommandId("shopping.move_checked_to_inventory"), type: "shopping.move_checked_to_inventory", payload: {} }, `Купленное перенесено в запасы: ${checkedCount} поз.`)}>Купленное в запасы</Button></div><div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" onClick={() => rebuildFor(state.meals.filter((meal) => meal.date === today), "сегодня")}>Из меню сегодня</Button><Button variant="outline" size="sm" onClick={() => rebuildFor(state.meals.filter((meal) => meal.date >= today && meal.date <= weekEndIso), "7 дней")}>Из меню на 7 дней</Button><Button variant="outline" size="sm" onClick={() => rebuildFor(state.meals, "все запланированное")}>Из всего меню</Button></div></CardHeader></Card><form className="flex gap-2" onSubmit={(event) => { event.preventDefault(); executeCommand({ commandId: nextCommandId("shopping.add_manual"), type: "shopping.add_manual", payload: { product: manualProduct } }, "Добавили вручную в покупки."); setManualProduct(""); }}><Input value={manualProduct} onChange={(event) => setManualProduct(event.target.value)} placeholder="Добавить вручную: молоко, хлеб, салфетки" /><Button>Добавить</Button></form>{Object.entries(grouped).map(([category, items]) => <Card key={category}><CardHeader><CardTitle>{category}</CardTitle></CardHeader><CardContent className="space-y-2">{items?.map((item) => { const unresolved = item.quantityStatus === "unresolved"; return <div key={item.id} className="flex flex-col gap-3 rounded-xl bg-white p-3 sm:flex-row sm:items-center sm:justify-between"><label className="flex items-center gap-3 font-semibold"><input type="checkbox" checked={unresolved ? false : item.checked} disabled={unresolved} aria-label={unresolved ? `${item.product}: сначала уточните количество` : `${item.product}: куплено`} onChange={(event) => update(item, { checked: event.target.checked })} /><span>{item.product} · {formatIngredientQuantity(item)}</span>{unresolved && <span className="rounded-full bg-[#fff1c9] px-2 py-1 text-xs font-bold text-[#6f4b16]">Уточнить количество</span>}</label><div className="flex flex-wrap gap-2"><Button variant="ghost" size="sm" onClick={() => update(item, { alreadyAtHome: !item.alreadyAtHome })}>{item.alreadyAtHome ? "Уже есть" : "Есть дома"}</Button><Button variant="ghost" size="sm" disabled={unresolved} onClick={() => update(item, { amount: Math.max(0.5, item.amount - 1) })}>Меньше</Button><Button variant="ghost" size="sm" disabled={unresolved} onClick={() => update(item, { amount: item.amount + 1 })}>Больше</Button><Button variant="danger" size="sm" onClick={() => commit({ ...state, shopping: state.shopping.filter((entry) => entry.id !== item.id) }, `${item.product}: удалено из покупок.`)}>Удалить</Button></div></div>; })}</CardContent></Card>)}</div>;
 }
 
 function SettingsView({ reset, onNavigate }: { reset: () => void; onNavigate: (section: (typeof sections)[number][0]) => void }) { return <div className="grid gap-4 xl:grid-cols-2"><Card><CardHeader><CardTitle>Настройки MVP</CardTitle></CardHeader><CardContent className="space-y-3"><p className="text-muted-foreground">Данные хранятся локально в браузере. Синхронизацию между семьями подключим через облачную базу на следующем этапе.</p><Button variant="outline" onClick={reset}>Сбросить демо-данные</Button></CardContent></Card><Card><CardHeader><CardTitle>Вкусы и ограничения</CardTitle></CardHeader><CardContent className="space-y-3"><p className="text-sm text-muted-foreground">Любимые блюда, запреты и заметки уже редактируются в профилях семьи и влияют на новое меню.</p><Button variant="soft" onClick={() => onNavigate("Семья")}><Users size={16} />Открыть профили семьи</Button></CardContent></Card><Card><CardHeader><CardTitle>Импорт рецепта</CardTitle></CardHeader><CardContent className="space-y-3"><p className="text-sm text-muted-foreground">В разделе «Блюда» работает ручной рецепт и черновик из вставленного текста со снимка. Настоящее распознавание изображения подключим вместе с AI.</p><Button variant="soft" onClick={() => onNavigate("Блюда")}><Camera size={16} />Открыть рецепты и импорт</Button><Button variant="outline" disabled><Sparkles size={16} />AI-распознавание: позже</Button></CardContent></Card></div>; }

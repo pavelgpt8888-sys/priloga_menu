@@ -508,24 +508,26 @@ export function planDishForDate(state: AppState, dishId: string, date: string, k
   return planDishForDateResult(state, dishId, date, kind).state;
 }
 
-export function addManualShoppingItem(state: AppState, product: string): AppState {
+export function addManualShoppingItem(state: AppState, product: string, idSuffix = String(Date.now())): AppState {
   if (!product.trim()) return state;
-  return { ...state, shopping: [...state.shopping, { id: `manual-${Date.now()}`, product: product.trim(), amount: 1, unit: "шт", category: "бакалея", checked: false, alreadyAtHome: false, manuallyAdded: true }] };
+  return { ...state, shopping: [...state.shopping, { id: `manual-${idSuffix}`, product: product.trim(), amount: 1, unit: "шт", category: "бакалея", checked: false, alreadyAtHome: false, manuallyAdded: true }] };
 }
 
-export function addRecipeToShopping(state: AppState, recipe: RecipeEntry): AppState {
-  const shopping = [...state.shopping];
-  recipe.ingredients.forEach((ingredient) => {
-    const existing = shopping.find((item) =>
+export function addRecipeToShopping(state: AppState, recipe: RecipeEntry, idSuffix = String(Date.now())): AppState {
+  let shopping = state.shopping.map((item) => ({ ...item }));
+  recipe.ingredients.forEach((ingredient, ingredientIndex) => {
+    const existingIndex = shopping.findIndex((item) =>
       item.product.toLowerCase() === ingredient.name.toLowerCase()
       && item.unit === ingredient.unit
       && item.category === ingredient.category
       && !item.checked
       && !item.alreadyAtHome
     );
-    if (existing) existing.amount += ingredient.amount;
-    else shopping.push({
-      id: `recipe-${recipe.id}-${ingredient.name.toLowerCase()}-${Date.now()}`,
+    if (existingIndex >= 0) {
+      const existing = shopping[existingIndex];
+      shopping = shopping.map((item, index) => index === existingIndex ? { ...existing, amount: existing.amount + ingredient.amount } : item);
+    } else shopping = [...shopping, {
+      id: `recipe-${recipe.id}-${ingredient.name.toLowerCase()}-${idSuffix}-${ingredientIndex}`,
       product: ingredient.name,
       amount: ingredient.amount,
       unit: ingredient.unit,
@@ -533,7 +535,7 @@ export function addRecipeToShopping(state: AppState, recipe: RecipeEntry): AppSt
       checked: false,
       alreadyAtHome: false,
       manuallyAdded: true,
-    });
+    }];
   });
   return { ...state, shopping };
 }
@@ -544,30 +546,32 @@ function storagePlaceForShoppingItem(item: ShoppingItem): StoragePlace {
   return "pantry";
 }
 
-export function moveCheckedShoppingToInventory(state: AppState): AppState {
+export function moveCheckedShoppingToInventory(state: AppState, idSuffix = String(Date.now())): AppState {
   // An unresolved row means that the product is needed but its quantity is not
   // confirmed. Ignore stale/manual `checked` flags until a later task supplies
   // a resolved quantity; never turn the sentinel amount into inventory.
   const checked = state.shopping.filter((item) => item.checked && !item.alreadyAtHome && item.quantityStatus !== "unresolved");
   if (!checked.length) return state;
-  const inventory = [...state.inventory];
+  let inventory = state.inventory.map((item) => ({ ...item }));
 
-  checked.forEach((item) => {
-    const existing = inventory.find((entry) =>
+  checked.forEach((item, checkedIndex) => {
+    const existingIndex = inventory.findIndex((entry) =>
       entry.product.toLowerCase() === item.product.toLowerCase()
       && entry.unit === item.unit
       && entry.place === storagePlaceForShoppingItem(item)
     );
-    if (existing) existing.amount += item.amount;
-    else inventory.push({
-      id: `inv-shopping-${item.product.toLowerCase()}-${Date.now()}`,
+    if (existingIndex >= 0) {
+      const existing = inventory[existingIndex];
+      inventory = inventory.map((entry, index) => index === existingIndex ? { ...existing, amount: existing.amount + item.amount } : entry);
+    } else inventory = [...inventory, {
+      id: `inv-shopping-${item.product.toLowerCase()}-${idSuffix}-${checkedIndex}`,
       product: item.product,
       amount: item.amount,
       unit: item.unit,
       category: item.category,
       place: storagePlaceForShoppingItem(item),
       source: "shopping",
-    });
+    }];
   });
 
   return { ...state, inventory, shopping: state.shopping.filter((item) => !item.checked || item.quantityStatus === "unresolved") };
